@@ -1,0 +1,7 @@
+[package]
+name = "tower-otel"
+version = "0.1.0"
+edition = "2021"
+authors = ["Mattia Penati <mattia.penati@protonmail.com>"]
+
+[dependencies]
