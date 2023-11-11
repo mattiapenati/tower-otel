@@ -1,7 +1,7 @@
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use pin_project_lite::pin_project;
@@ -47,9 +47,9 @@ pub struct OtelTrace<S> {
     level: Level,
 }
 
-impl<S, ReqBody> Service<http::Request<ReqBody>> for OtelTrace<S>
+impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for OtelTrace<S>
 where
-    S: Service<http::Request<ReqBody>>,
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -76,17 +76,23 @@ pin_project! {
     }
 }
 
-impl<F> Future for ResponseFuture<F>
+impl<F, ResBody, E> Future for ResponseFuture<F>
 where
-    F: Future,
+    F: Future<Output = Result<http::Response<ResBody>, E>>,
 {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _guard = this.span.enter();
+        let _enter = this.span.enter();
 
-        this.inner.poll(cx)
+        match ready!(this.inner.poll(cx)) {
+            Ok(response) => {
+                update_span(this.span, &response);
+                Poll::Ready(Ok(response))
+            }
+            Err(err) => Poll::Ready(Err(err)),
+        }
     }
 }
 
@@ -97,6 +103,7 @@ fn make_span<B>(level: Level, req: &http::Request<B>) -> Span {
                 $level,
                 "request",
                 "http.request.method" = %req.method(),
+                "http.response.status_code" = tracing::field::Empty,
                 "url.path" = req.uri().path(),
                 "url.query" = req.uri().query(),
             )
@@ -119,4 +126,16 @@ fn make_span<B>(level: Level, req: &http::Request<B>) -> Span {
     }
 
     span
+}
+
+fn update_span<B>(span: &Span, res: &http::Response<B>) {
+    // `u16` values are recorded as string
+    span.record("http.response.status_code", res.status().as_u16() as i64);
+
+    for (header_name, header_value) in res.headers().iter() {
+        if let Ok(attribute_value) = header_value.to_str() {
+            let attribute_name = format!("http.response.header.{}", header_name);
+            span.set_attribute(attribute_name, attribute_value.to_owned());
+        }
+    }
 }
