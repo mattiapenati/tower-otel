@@ -8,6 +8,7 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// [`Layer`] that adds OpenTelemetry tracing to a [`Service`].
 ///
@@ -46,9 +47,9 @@ pub struct OtelTrace<S> {
     level: Level,
 }
 
-impl<S, Req> Service<Req> for OtelTrace<S>
+impl<S, ReqBody> Service<http::Request<ReqBody>> for OtelTrace<S>
 where
-    S: Service<Req>,
+    S: Service<http::Request<ReqBody>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -58,9 +59,9 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Req) -> Self::Future {
+    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
+        let span = make_span(self.level, &req);
         let inner = self.inner.call(req);
-        let span = make_span(self.level);
 
         ResponseFuture { inner, span }
     }
@@ -89,12 +90,33 @@ where
     }
 }
 
-fn make_span(level: Level) -> Span {
-    match level {
-        Level::ERROR => tracing::error_span!("request"),
-        Level::WARN => tracing::warn_span!("request"),
-        Level::INFO => tracing::info_span!("request"),
-        Level::DEBUG => tracing::debug_span!("request"),
-        Level::TRACE => tracing::trace_span!("request"),
+fn make_span<B>(level: Level, req: &http::Request<B>) -> Span {
+    macro_rules! make_span {
+        ($level:expr) => {{
+            tracing::span!(
+                $level,
+                "request",
+                "http.request.method" = %req.method(),
+                "url.path" = req.uri().path(),
+                "url.query" = req.uri().query(),
+            )
+        }};
     }
+
+    let span = match level {
+        Level::ERROR => make_span!(Level::ERROR),
+        Level::WARN => make_span!(Level::WARN),
+        Level::INFO => make_span!(Level::INFO),
+        Level::DEBUG => make_span!(Level::DEBUG),
+        Level::TRACE => make_span!(Level::TRACE),
+    };
+
+    for (header_name, header_value) in req.headers().iter() {
+        if let Ok(attribute_value) = header_value.to_str() {
+            let attribute_name = format!("http.request.header.{}", header_name);
+            span.set_attribute(attribute_name, attribute_value.to_owned());
+        }
+    }
+
+    span
 }

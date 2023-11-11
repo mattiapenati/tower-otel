@@ -1,11 +1,14 @@
 [package]
-name = "tower-otel"
+name = "tower-otel-http"
 version = "0.1.0"
 edition = "2021"
 authors = ["Mattia Penati <mattia.penati@protonmail.com>"]
+autoexamples = false
 
 [dependencies]
+http = "0.2.10"
 pin-project-lite = "0.2.13"
 tower-layer = "0.3.2"
 tower-service = "0.3.2"
 tracing = { version = "0.1.40", default-features = false }
+tracing-opentelemetry = { version = "0.22.0", default-features = false }
