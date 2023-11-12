@@ -5,11 +5,17 @@
 use tracing::Level;
 
 pub use self::{
-    layer::OtelTraceLayer, make_span::OtelMakeSpan, on_body_chunk::OtelOnBodyChunk,
-    on_eos::OtelOnEos, on_failure::OtelOnFailure, on_request::OtelOnRequest,
+    http_client::{HttpClient, HttpClientLayer},
+    layer::OtelTraceLayer,
+    make_span::OtelMakeSpan,
+    on_body_chunk::OtelOnBodyChunk,
+    on_eos::OtelOnEos,
+    on_failure::OtelOnFailure,
+    on_request::OtelOnRequest,
     on_response::OtelOnResponse,
 };
 
+pub mod http_client;
 mod layer;
 mod make_span;
 mod on_body_chunk;
