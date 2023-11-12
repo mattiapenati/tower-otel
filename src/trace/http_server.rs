@@ -1,4 +1,4 @@
-//! Middleware that adds tracing to a [`Service`] that makes outgoing HTTP requests.
+//! Middleware that adds tracing to a [`Service`] that accepts HTTP requests.
 
 use std::{
     error::Error as StdError,
@@ -8,44 +8,44 @@ use std::{
 };
 
 use http::{Request, Response, Version};
-use opentelemetry_http::HeaderInjector;
+use opentelemetry_http::HeaderExtractor;
 use pin_project::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-/// [`Layer`] that adds tracing on a [`Service`] that makes outgoing HTTP requests.
+/// [`Layer`] that adds tracing on a [`Service`] that accepts HTTP requests.
 #[derive(Clone, Debug)]
-pub struct HttpClientLayer {
+pub struct HttpServerLayer {
     level: Level,
 }
 
-impl HttpClientLayer {
+impl HttpServerLayer {
     /// [`Span`]s are constructed at the given level
     pub fn new(level: Level) -> Self {
         Self { level }
     }
 }
 
-impl<S> Layer<S> for HttpClientLayer {
-    type Service = HttpClient<S>;
+impl<S> Layer<S> for HttpServerLayer {
+    type Service = HttpServer<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
         let level = self.level;
 
-        HttpClient { inner, level }
+        HttpServer { inner, level }
     }
 }
 
-/// Middleware that adds on a [`Service`] that makes outgoing HTTP requests.
+/// Middleware that adds on a [`Service`] that accepts HTTP requests.
 #[derive(Clone, Debug)]
-pub struct HttpClient<S> {
+pub struct HttpServer<S> {
     inner: S,
     level: Level,
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for HttpClient<S>
+impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for HttpServer<S>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
     S::Error: StdError,
@@ -69,7 +69,7 @@ where
     }
 }
 
-/// Response future for [`HttpClient`].
+/// Response future for [`HttpServer`].
 #[pin_project]
 pub struct ResponseFuture<F> {
     #[pin]
@@ -126,7 +126,8 @@ fn make_request_span<B>(level: Level, request: &mut Request<B>) -> Span {
                 "network.protocol.name" = "http",
                 "network.protocol.version" = network_protocol_version(request.version()),
                 "otel.status_code" = tracing::field::Empty,
-                "url.full" = %request.uri(),
+                "url.path" = request.uri().path(),
+                "url.query" = request.uri().query(),
             )
         };
     }
@@ -146,10 +147,10 @@ fn make_request_span<B>(level: Level, request: &mut Request<B>) -> Span {
         }
     }
 
-    let context = span.context();
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
+    let context = opentelemetry::global::get_text_map_propagator(|extractor| {
+        extractor.extract(&HeaderExtractor(request.headers_mut()))
     });
+    span.set_parent(context);
 
     span
 }
@@ -168,8 +169,8 @@ fn record_response<B>(span: &Span, response: &Response<B>) {
         }
     }
 
-    // client errors are marked as errors
-    if response.status().is_client_error() {
+    // server errors are marked as errors
+    if response.status().is_server_error() {
         span.record("otel.status_code", "ERROR");
     }
 }
