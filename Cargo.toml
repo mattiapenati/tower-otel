@@ -1,3 +1,9 @@
+[workspace]
+members = [".", "examples/http"]
+
+[workspace.dependencies]
+tower-otel = { path = "." }
+
 [package]
 name = "tower-otel"
 version = "0.1.0"

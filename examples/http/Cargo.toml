@@ -1,0 +1,19 @@
+[package]
+name = "example-http"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+axum = { version = "0.6", default-features = false, features = ["http1", "tokio"] }
+http = "0.2"
+hyper = { version = "0.14", features = ["http1", "client"] }
+opentelemetry = { version = "0.21", default-features = false }
+opentelemetry-otlp = { version = "0.14", default-features = false, features = ["trace", "grpc-tonic"] }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "rt-multi-thread"] }
+tower = { version = "0.4", default-features = false }
+tower-otel.workspace = true
+tracing = "0.1"
+tracing-opentelemetry = { version = "0.22", default-features = false }
+tracing-subscriber = "0.3"
