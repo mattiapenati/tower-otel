@@ -1,22 +1,32 @@
 [workspace]
 members = [".", "examples/http", "examples/grpc"]
 
+[workspace.package]
+authors = ["Mattia Penati <mattia.penati@protonmail.com>"]
+edition = "2021"
+
 [workspace.dependencies]
+opentelemetry = { version = "0.21.0", default-features = false }
+opentelemetry-otlp = { version = "0.14", default-features = false, features = ["trace", "grpc-tonic"] }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
 tower-otel = { path = "." }
+tracing = { version = "0.1.40", default-features = false }
+tracing-opentelemetry = { version = "0.22", default-features = false }
+tracing-subscriber = "0.3"
 
 [package]
 name = "tower-otel"
 version = "0.1.0"
-edition = "2021"
-authors = ["Mattia Penati <mattia.penati@protonmail.com>"]
+edition.workspace = true
+authors.workspace = true
 autoexamples = false
 
 [dependencies]
 http = "0.2.10"
-opentelemetry = { version = "0.21.0", default-features = false }
+opentelemetry.workspace = true
 opentelemetry-http = "0.10.0"
 pin-project = "1.1.3"
 tower-layer = "0.3.2"
 tower-service = "0.3.2"
-tracing = { version = "0.1.40", default-features = false }
-tracing-opentelemetry = { version = "0.22.0", default-features = false }
+tracing.workspace = true
+tracing-opentelemetry.workspace = true

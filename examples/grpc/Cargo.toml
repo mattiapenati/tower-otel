@@ -1,18 +1,20 @@
 [package]
 name = "example-grpc"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
+authors.workspace = true
+publish = false
 
 [dependencies]
-opentelemetry = { version = "0.21", default-features = false }
-opentelemetry-otlp = { version = "0.14", default-features = false, features = ["trace", "grpc-tonic"] }
-opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
+opentelemetry.workspace = true
+opentelemetry-otlp.workspace = true
+opentelemetry_sdk.workspace = true
 prost = "0.12"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 tonic = "0.10"
-tracing = "0.1"
-tracing-opentelemetry = { version = "0.22", default-features = false }
-tracing-subscriber = "0.3"
+tracing.workspace = true
+tracing-opentelemetry.workspace = true
+tracing-subscriber.workspace = true
 
 [build-dependencies]
 tonic-build = "0.10"
