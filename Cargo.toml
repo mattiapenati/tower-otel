@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "examples/http"]
+members = [".", "examples/http", "examples/grpc"]
 
 [workspace.dependencies]
 tower-otel = { path = "." }
