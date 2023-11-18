@@ -12,6 +12,8 @@ opentelemetry_sdk.workspace = true
 prost = "0.12"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 tonic = "0.10"
+tower = { version = "0.4", default-features = false }
+tower-otel.workspace = true
 tracing.workspace = true
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true

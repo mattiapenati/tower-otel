@@ -3,6 +3,10 @@
 //! [`Service`]: tower_service::Service
 
 #[doc(inline)]
-pub use self::http::{Http, HttpLayer};
+pub use self::{
+    grpc::{Grpc, GrpcLayer},
+    http::{Http, HttpLayer},
+};
 
+pub mod grpc;
 pub mod http;

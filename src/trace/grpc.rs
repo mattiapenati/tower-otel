@@ -1,4 +1,4 @@
-//! Middleware that adds tracing to a [`Service`] that handles HTTP requests.
+//! Middleware that adds tracing to a [`Service`] that handles gRPC requests.
 
 use std::{
     fmt::Display,
@@ -7,7 +7,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use http::{Method, Request, Response, Version};
+use http::{Request, Response};
 use opentelemetry_http::{HeaderExtractor, HeaderInjector};
 use pin_project::pin_project;
 use tower_layer::Layer;
@@ -24,14 +24,14 @@ enum SpanKind {
     Server,
 }
 
-/// [`Layer`] that adds tracing to a [`Service`] that handles HTTP requests.
+/// [`Layer`] that adds tracing to a [`Service`] that handles gRRC requests.
 #[derive(Clone, Debug)]
-pub struct HttpLayer {
+pub struct GrpcLayer {
     level: Level,
     kind: SpanKind,
 }
 
-impl HttpLayer {
+impl GrpcLayer {
     /// [`Span`]s are constructed at the given level from server side.
     pub fn server(level: Level) -> Self {
         Self {
@@ -49,11 +49,11 @@ impl HttpLayer {
     }
 }
 
-impl<S> Layer<S> for HttpLayer {
-    type Service = Http<S>;
+impl<S> Layer<S> for GrpcLayer {
+    type Service = Grpc<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Http {
+        Grpc {
             inner,
             level: self.level,
             kind: self.kind,
@@ -61,15 +61,15 @@ impl<S> Layer<S> for HttpLayer {
     }
 }
 
-/// Middleware that adds tracing to a [`Service`] that handles HTTP requests.
+/// Middleware that adds tracing to a [`Service`] that handles gRPC requests.
 #[derive(Clone, Debug)]
-pub struct Http<S> {
+pub struct Grpc<S> {
     inner: S,
     level: Level,
     kind: SpanKind,
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for Http<S>
+impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for Grpc<S>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
     S::Error: Display,
@@ -89,21 +89,16 @@ where
             self.inner.call(req)
         };
 
-        ResponseFuture {
-            inner,
-            span,
-            kind: self.kind,
-        }
+        ResponseFuture { inner, span }
     }
 }
 
-/// Response future for [`Http`].
+/// Response future for [`Grpc`].
 #[pin_project]
 pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
     span: Span,
-    kind: SpanKind,
 }
 
 impl<F, ResBody, E> Future for ResponseFuture<F>
@@ -119,7 +114,7 @@ where
 
         match ready!(this.inner.poll(cx)) {
             Ok(response) => {
-                record_response(this.span, *this.kind, &response);
+                record_response(this.span, &response);
                 Poll::Ready(Ok(response))
             }
             Err(err) => {
@@ -127,34 +122,6 @@ where
                 Poll::Ready(Err(err))
             }
         }
-    }
-}
-
-/// String representation of HTTP method
-fn http_method(method: &Method) -> Option<&'static str> {
-    match *method {
-        Method::GET => Some("GET"),
-        Method::POST => Some("POST"),
-        Method::PUT => Some("PUT"),
-        Method::DELETE => Some("DELETE"),
-        Method::HEAD => Some("HEAD"),
-        Method::OPTIONS => Some("OPTIONS"),
-        Method::CONNECT => Some("CONNECT"),
-        Method::PATCH => Some("PATCH"),
-        Method::TRACE => Some("TRACE"),
-        _ => None,
-    }
-}
-
-/// String representation of network protocol version
-fn http_version(version: Version) -> Option<&'static str> {
-    match version {
-        Version::HTTP_09 => Some("0.9"),
-        Version::HTTP_10 => Some("1.0"),
-        Version::HTTP_11 => Some("1.1"),
-        Version::HTTP_2 => Some("2"),
-        Version::HTTP_3 => Some("3"),
-        _ => None,
     }
 }
 
@@ -174,17 +141,15 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
 
             tracing::span!(
                 $level,
-                "HTTP",
+                "GRPC",
                 "error.message" = Empty,
-                "http.request.method" = http_method(request.method()),
-                "http.response.status_code" = Empty,
-                "network.protocol.name" = "http",
-                "network.protocol.version" = http_version(request.version()),
                 "otel.kind" = Empty,
+                "otel.name" = Empty,
                 "otel.status_code" = Empty,
-                "url.full" = Empty,
-                "url.path" = Empty,
-                "url.query" = Empty,
+                "rpc.grpc.status_code" = Empty,
+                "rpc.method" = Empty,
+                "rpc.service" = Empty,
+                "rpc.system" = "grpc",
             )
         }};
     }
@@ -199,21 +164,23 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
 
     for (header_name, header_value) in request.headers().iter() {
         if let Ok(attribute_value) = header_value.to_str() {
-            let attribute_name = format!("http.request.header.{}", header_name);
+            let attribute_name = format!("rpc.grpc.request.metadata.{}", header_name);
             span.set_attribute(attribute_name, attribute_value.to_owned());
         }
     }
 
-    span.record("url.path", request.uri().path());
-    if let Some(query) = request.uri().query() {
-        span.record("url.query", query);
-    }
     span.record("otel.kind", span_kind(kind));
+
+    let path = request.uri().path();
+    let name = path.trim_start_matches('/');
+    span.record("otel.name", name);
+    if let Some((service, method)) = name.split_once('/') {
+        span.record("rpc.service", service);
+        span.record("rpc.method", method);
+    }
 
     match kind {
         SpanKind::Client => {
-            span.record("url.full", tracing::field::display(request.uri()));
-
             let context = span.context();
             opentelemetry::global::get_text_map_propagator(|injector| {
                 injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
@@ -231,26 +198,24 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
 }
 
 /// Records fields associated to the response.
-fn record_response<B>(span: &Span, kind: SpanKind, response: &Response<B>) {
-    span.record(
-        "http.response.status_code",
-        response.status().as_u16() as i64,
-    );
+fn record_response<B>(span: &Span, response: &Response<B>) {
+    const GRPC_STATUS_HEADER_CODE: &str = "grpc-status";
 
     for (header_name, header_value) in response.headers().iter() {
         if let Ok(attribute_value) = header_value.to_str() {
-            let attribute_name = format!("http.response.header.{}", header_name);
+            let attribute_name = format!("rpc.grpc.response.metadata.{}", header_name);
             span.set_attribute(attribute_name, attribute_value.to_owned());
         }
     }
 
-    if let SpanKind::Client = kind {
-        if response.status().is_client_error() {
-            span.record("otel.status_code", "ERROR");
+    if let Some(header_value) = response.headers().get(GRPC_STATUS_HEADER_CODE) {
+        if let Ok(header_value) = header_value.to_str() {
+            if let Ok(status_code) = header_value.parse::<i32>() {
+                span.record("rpc.grpc.status_code", status_code);
+            }
         }
-    }
-    if response.status().is_server_error() {
-        span.record("otel.status_code", "ERROR");
+    } else {
+        span.record("rpc.grpc.status_code", 0);
     }
 }
 

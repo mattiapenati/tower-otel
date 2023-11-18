@@ -1,11 +1,15 @@
 use opentelemetry_sdk::{propagation::TraceContextPropagator, runtime::Tokio};
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{
+    transport::{Channel, Server},
+    Request, Response, Status,
+};
 
 use hello_world::{
     greeter_client::GreeterClient,
     greeter_server::{Greeter, GreeterServer},
     {HelloReply, HelloRequest},
 };
+use tower_otel::trace::GrpcLayer;
 use tracing::{level_filters::LevelFilter, Level};
 use tracing_subscriber::{
     fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, Layer,
@@ -57,11 +61,16 @@ async fn main() {
     let addr = "[::1]:50051".parse().unwrap();
     let greeter = MyGreeter;
     let server = Server::builder()
+        .layer(GrpcLayer::server(Level::DEBUG))
         .add_service(GreeterServer::new(greeter))
         .serve(addr);
     tokio::spawn(server);
 
-    let mut client = GreeterClient::connect("http://[::1]:50051").await.unwrap();
+    let channel = Channel::from_static("http://[::1]:50051").connect_lazy();
+    let channel = tower::ServiceBuilder::new()
+        .layer(GrpcLayer::client(Level::DEBUG))
+        .service(channel);
+    let mut client = GreeterClient::new(channel);
     let request = tonic::Request::new(HelloRequest {
         name: "Tonic".into(),
     });
