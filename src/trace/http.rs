@@ -158,6 +158,14 @@ fn http_version(version: Version) -> Option<&'static str> {
     }
 }
 
+/// String representation of span kind
+fn span_kind(kind: SpanKind) -> &'static str {
+    match kind {
+        SpanKind::Client => "client",
+        SpanKind::Server => "server",
+    }
+}
+
 /// Creates a new [`Span`] for the given request.
 fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) -> Span {
     macro_rules! make_span {
@@ -166,7 +174,7 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
 
             tracing::span!(
                 $level,
-                "HTTP request",
+                "HTTP",
                 "error.message" = Empty,
                 "http.request.method" = http_method(request.method()),
                 "http.response.status_code" = Empty,
@@ -196,9 +204,14 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
         }
     }
 
+    span.record("url.path", request.uri().path());
+    if let Some(query) = request.uri().query() {
+        span.record("url.query", query);
+    }
+    span.record("otel.kind", span_kind(kind));
+
     match kind {
         SpanKind::Client => {
-            span.record("otel.kind", "client");
             span.record("url.full", tracing::field::display(request.uri()));
 
             let context = span.context();
@@ -207,12 +220,6 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
             });
         }
         SpanKind::Server => {
-            span.record("otel.kind", "server");
-            span.record("url.path", request.uri().path());
-            if let Some(query) = request.uri().query() {
-                span.record("url.query", query);
-            }
-
             let context = opentelemetry::global::get_text_map_propagator(|extractor| {
                 extractor.extract(&HeaderExtractor(request.headers_mut()))
             });
@@ -237,17 +244,13 @@ fn record_response<B>(span: &Span, kind: SpanKind, response: &Response<B>) {
         }
     }
 
-    match kind {
-        SpanKind::Client => {
-            if response.status().is_client_error() {
-                span.record("otel.status_code", "ERROR");
-            }
+    if let SpanKind::Client = kind {
+        if response.status().is_client_error() {
+            span.record("otel.status_code", "ERROR");
         }
-        SpanKind::Server => {
-            if response.status().is_server_error() {
-                span.record("otel.status_code", "ERROR");
-            }
-        }
+    }
+    if response.status().is_server_error() {
+        span.record("otel.status_code", "ERROR");
     }
 }
 
