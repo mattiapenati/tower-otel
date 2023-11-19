@@ -17,6 +17,7 @@ tracing-subscriber = "0.3"
 [package]
 name = "tower-otel"
 version = "0.1.0"
+description = "OpenTelemetry layer for HTTP/gRPC services"
 edition.workspace = true
 authors.workspace = true
 autoexamples = false

@@ -199,8 +199,6 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
 
 /// Records fields associated to the response.
 fn record_response<B>(span: &Span, response: &Response<B>) {
-    const GRPC_STATUS_HEADER_CODE: &str = "grpc-status";
-
     for (header_name, header_value) in response.headers().iter() {
         if let Ok(attribute_value) = header_value.to_str() {
             let attribute_name = format!("rpc.grpc.response.metadata.{}", header_name);
@@ -208,7 +206,7 @@ fn record_response<B>(span: &Span, response: &Response<B>) {
         }
     }
 
-    if let Some(header_value) = response.headers().get(GRPC_STATUS_HEADER_CODE) {
+    if let Some(header_value) = response.headers().get("grpc-status") {
         if let Ok(header_value) = header_value.to_str() {
             if let Ok(status_code) = header_value.parse::<i32>() {
                 span.record("rpc.grpc.status_code", status_code);
