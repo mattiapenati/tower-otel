@@ -1,5 +1,4 @@
-use axum::{routing::get, Router};
-use http::Request;
+use axum::{http::Request, routing::get, Router};
 use hyper::Client;
 use opentelemetry_sdk::{propagation::TraceContextPropagator, runtime::Tokio};
 use tower::{Service, ServiceBuilder, ServiceExt};
