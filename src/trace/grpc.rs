@@ -143,7 +143,7 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 $level,
                 "GRPC",
                 "error.message" = Empty,
-                "otel.kind" = Empty,
+                "otel.kind" = span_kind(kind),
                 "otel.name" = Empty,
                 "otel.status_code" = Empty,
                 "rpc.grpc.status_code" = Empty,
@@ -168,8 +168,6 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
             span.set_attribute(attribute_name, attribute_value.to_owned());
         }
     }
-
-    span.record("otel.kind", span_kind(kind));
 
     let path = request.uri().path();
     let name = path.trim_start_matches('/');

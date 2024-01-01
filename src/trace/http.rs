@@ -180,10 +180,10 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 "http.response.status_code" = Empty,
                 "network.protocol.name" = "http",
                 "network.protocol.version" = http_version(request.version()),
-                "otel.kind" = Empty,
+                "otel.kind" = span_kind(kind),
                 "otel.status_code" = Empty,
                 "url.full" = Empty,
-                "url.path" = Empty,
+                "url.path" = request.uri().path(),
                 "url.query" = Empty,
             )
         }};
@@ -204,11 +204,9 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
         }
     }
 
-    span.record("url.path", request.uri().path());
     if let Some(query) = request.uri().query() {
         span.record("url.query", query);
     }
-    span.record("otel.kind", span_kind(kind));
 
     match kind {
         SpanKind::Client => {
