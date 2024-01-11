@@ -8,12 +8,13 @@ use std::{
 };
 
 use http::{Request, Response};
-use opentelemetry_http::{HeaderExtractor, HeaderInjector};
 use pin_project::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+use super::{extractor::HeaderExtractor, injector::HeaderInjector};
 
 /// Describes the relationship between the [`Span`] and the service producing the span.
 #[derive(Clone, Copy, Debug)]
