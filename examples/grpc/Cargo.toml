@@ -9,9 +9,9 @@ publish = false
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
-prost = "0.12"
+prost = "0.13"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
-tonic = "0.10"
+tonic = "0.12"
 tower = { version = "0.4", default-features = false }
 tower-otel.workspace = true
 tracing.workspace = true
