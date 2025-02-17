@@ -28,17 +28,16 @@ async fn main() {
         opentelemetry::KeyValue::new("service.version", PKG_VERSION),
     ];
 
-    let trace_config = opentelemetry_sdk::trace::Config::default()
-        .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
-        .with_resource(opentelemetry_sdk::Resource::new(resources));
-
-    let exporter = opentelemetry_otlp::new_exporter().tonic();
-    let tracer_provider = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_trace_config(trace_config)
-        .with_exporter(exporter)
-        .install_batch(Tokio)
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .build()
         .unwrap();
+
+    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+        .with_resource(opentelemetry_sdk::Resource::new(resources))
+        .with_batch_exporter(exporter, Tokio)
+        .build();
 
     let telemetry = tracing_opentelemetry::layer()
         .with_tracer(tracer_provider.tracer("default_tracer"))
