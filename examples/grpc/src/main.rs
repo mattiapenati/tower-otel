@@ -1,3 +1,4 @@
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::{propagation::TraceContextPropagator, runtime::Tokio};
 use tonic::{
     transport::{Channel, Server},
@@ -31,12 +32,12 @@ async fn main() {
         opentelemetry::KeyValue::new("service.version", PKG_VERSION),
     ];
 
-    let trace_config = opentelemetry_sdk::trace::config()
+    let trace_config = opentelemetry_sdk::trace::Config::default()
         .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
         .with_resource(opentelemetry_sdk::Resource::new(resources));
 
     let exporter = opentelemetry_otlp::new_exporter().tonic();
-    let tracer = opentelemetry_otlp::new_pipeline()
+    let tracer_provider = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_trace_config(trace_config)
         .with_exporter(exporter)
@@ -44,16 +45,16 @@ async fn main() {
         .unwrap();
 
     let telemetry = tracing_opentelemetry::layer()
-        .with_tracer(tracer)
+        .with_tracer(tracer_provider.tracer("default_tracer"))
         .with_tracked_inactivity(true)
-        .with_filter(LevelFilter::TRACE);
+        .with_filter(LevelFilter::INFO);
 
     let fmt = tracing_subscriber::fmt::layer()
         .with_level(true)
         .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE);
 
     tracing_subscriber::registry()
-        .with(LevelFilter::from_level(Level::TRACE))
+        .with(LevelFilter::from_level(Level::INFO))
         .with(telemetry)
         .with(fmt)
         .init();
@@ -61,14 +62,14 @@ async fn main() {
     let addr = "[::1]:50051".parse().unwrap();
     let greeter = MyGreeter;
     let server = Server::builder()
-        .layer(GrpcLayer::server(Level::DEBUG))
+        .layer(GrpcLayer::server(Level::INFO))
         .add_service(GreeterServer::new(greeter))
         .serve(addr);
     tokio::spawn(server);
 
     let channel = Channel::from_static("http://[::1]:50051").connect_lazy();
     let channel = tower::ServiceBuilder::new()
-        .layer(GrpcLayer::client(Level::DEBUG))
+        .layer(GrpcLayer::client(Level::INFO))
         .service(channel);
     let mut client = GreeterClient::new(channel);
     let request = tonic::Request::new(HelloRequest {

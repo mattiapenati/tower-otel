@@ -6,6 +6,7 @@ use std::{
 
 use axum::{http::Request, routing::get, Router};
 use http_body_util::{BodyExt, Empty};
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::{propagation::TraceContextPropagator, runtime::Tokio};
 use pin_project::pin_project;
 use tower::{Service, ServiceBuilder, ServiceExt};
@@ -27,12 +28,12 @@ async fn main() {
         opentelemetry::KeyValue::new("service.version", PKG_VERSION),
     ];
 
-    let trace_config = opentelemetry_sdk::trace::config()
+    let trace_config = opentelemetry_sdk::trace::Config::default()
         .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
         .with_resource(opentelemetry_sdk::Resource::new(resources));
 
     let exporter = opentelemetry_otlp::new_exporter().tonic();
-    let tracer = opentelemetry_otlp::new_pipeline()
+    let tracer_provider = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_trace_config(trace_config)
         .with_exporter(exporter)
@@ -40,7 +41,7 @@ async fn main() {
         .unwrap();
 
     let telemetry = tracing_opentelemetry::layer()
-        .with_tracer(tracer)
+        .with_tracer(tracer_provider.tracer("default_tracer"))
         .with_tracked_inactivity(true)
         .with_filter(LevelFilter::TRACE);
 
