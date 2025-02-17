@@ -7,7 +7,7 @@ use std::{
 use axum::{http::Request, routing::get, Router};
 use http_body_util::{BodyExt, Empty};
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::{propagation::TraceContextPropagator, runtime::Tokio};
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use pin_project::pin_project;
 use tower::{Service, ServiceBuilder, ServiceExt};
 use tower_otel::trace::HttpLayer;
@@ -23,20 +23,20 @@ async fn main() {
     const PKG_NAME: &str = env!("CARGO_PKG_NAME");
     const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-    let resources = vec![
-        opentelemetry::KeyValue::new("service.name", PKG_NAME),
-        opentelemetry::KeyValue::new("service.version", PKG_VERSION),
-    ];
+    let resource = opentelemetry_sdk::Resource::builder()
+        .with_service_name(PKG_NAME)
+        .with_attribute(opentelemetry::KeyValue::new("service.version", PKG_VERSION))
+        .build();
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .build()
         .unwrap();
 
-    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+    let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
         .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
-        .with_resource(opentelemetry_sdk::Resource::new(resources))
-        .with_batch_exporter(exporter, Tokio)
+        .with_resource(resource)
+        .with_batch_exporter(exporter)
         .build();
 
     let telemetry = tracing_opentelemetry::layer()
@@ -77,7 +77,7 @@ async fn main() {
     let body = std::str::from_utf8(&body).unwrap();
     tracing::info!("received '{}'", body);
 
-    opentelemetry::global::shutdown_tracer_provider();
+    tracer_provider.shutdown().unwrap();
 }
 
 struct Client<B>(hyper::client::conn::http1::SendRequest<B>);
