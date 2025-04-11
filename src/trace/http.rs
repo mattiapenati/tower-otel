@@ -7,14 +7,17 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use http::{Method, Request, Response, Version};
+use http::{Request, Response};
 use pin_project::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use super::{extractor::HeaderExtractor, injector::HeaderInjector};
+use crate::{
+    trace::{extractor::HeaderExtractor, injector::HeaderInjector},
+    util,
+};
 
 /// Describes the relationship between the [`Span`] and the service producing the span.
 #[derive(Clone, Copy, Debug)]
@@ -131,34 +134,6 @@ where
     }
 }
 
-/// String representation of HTTP method
-fn http_method(method: &Method) -> Option<&'static str> {
-    match *method {
-        Method::GET => Some("GET"),
-        Method::POST => Some("POST"),
-        Method::PUT => Some("PUT"),
-        Method::DELETE => Some("DELETE"),
-        Method::HEAD => Some("HEAD"),
-        Method::OPTIONS => Some("OPTIONS"),
-        Method::CONNECT => Some("CONNECT"),
-        Method::PATCH => Some("PATCH"),
-        Method::TRACE => Some("TRACE"),
-        _ => None,
-    }
-}
-
-/// String representation of network protocol version
-fn http_version(version: Version) -> Option<&'static str> {
-    match version {
-        Version::HTTP_09 => Some("0.9"),
-        Version::HTTP_10 => Some("1.0"),
-        Version::HTTP_11 => Some("1.1"),
-        Version::HTTP_2 => Some("2"),
-        Version::HTTP_3 => Some("3"),
-        _ => None,
-    }
-}
-
 /// String representation of span kind
 fn span_kind(kind: SpanKind) -> &'static str {
     match kind {
@@ -177,10 +152,10 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 $level,
                 "HTTP",
                 "error.message" = Empty,
-                "http.request.method" = http_method(request.method()),
+                "http.request.method" = util::http_method(request.method()),
                 "http.response.status_code" = Empty,
                 "network.protocol.name" = "http",
-                "network.protocol.version" = http_version(request.version()),
+                "network.protocol.version" = util::http_version(request.version()),
                 "otel.kind" = span_kind(kind),
                 "otel.status_code" = Empty,
                 "url.full" = Empty,
