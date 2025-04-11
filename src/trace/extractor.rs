@@ -4,7 +4,7 @@ use http::HeaderMap;
 
 pub struct HeaderExtractor<'a>(pub &'a HeaderMap);
 
-impl<'a> opentelemetry::propagation::Extractor for HeaderExtractor<'a> {
+impl opentelemetry::propagation::Extractor for HeaderExtractor<'_> {
     fn get(&self, key: &str) -> Option<&str> {
         self.0
             .get(key)
