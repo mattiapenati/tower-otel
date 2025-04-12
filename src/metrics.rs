@@ -10,4 +10,4 @@
 #[doc(inline)]
 pub use self::http::{Http, HttpLayer};
 
-mod http;
+pub mod http;
