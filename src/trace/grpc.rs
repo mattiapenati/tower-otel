@@ -14,7 +14,7 @@ use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use super::{extractor::HeaderExtractor, injector::HeaderInjector};
+use crate::trace::{extractor::HeaderExtractor, injector::HeaderInjector};
 
 /// Describes the relationship between the [`Span`] and the service producing the span.
 #[derive(Clone, Copy, Debug)]
