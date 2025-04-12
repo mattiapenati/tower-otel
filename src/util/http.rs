@@ -46,3 +46,16 @@ pub fn http_response_size<B: Body>(res: &http::Response<B>) -> Option<u64> {
         .and_then(|v| v.parse().ok())
         .or_else(|| res.body().size_hint().exact())
 }
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "axum")] {
+        pub fn http_route<B>(req: &http::Request<B>) -> Option<&str> {
+            use axum::extract::MatchedPath;
+            req.extensions().get::<MatchedPath>().map(|matched_path| matched_path.as_str())
+        }
+    } else {
+        pub fn http_route<B>(_req: &http::Request<B>) -> Option<&str> {
+            None
+        }
+    }
+}

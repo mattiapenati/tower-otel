@@ -33,6 +33,10 @@ license.workspace = true
 autoexamples = false
 
 [dependencies]
+axum = { version = "0.8", optional = true, default-features = false, features = [
+  "matched-path",
+] }
+cfg-if = "1"
 http = "1"
 http-body = "1"
 opentelemetry = { version = "0.29", default-features = false }
@@ -41,3 +45,7 @@ tower-layer = "0.3"
 tower-service = "0.3"
 tracing = { version = "0.1", default-features = false }
 tracing-opentelemetry = { version = "0.30", default-features = false }
+
+[features]
+default = []
+axum = ["dep:axum"]

@@ -36,7 +36,7 @@ pub struct HttpLayer {
 }
 
 impl HttpLayer {
-    /// [`Span`]s are constructed at the given level from server side.
+    /// [`Span`] are constructed at the given level from server side.
     pub fn server(level: Level) -> Self {
         Self {
             level,
@@ -44,7 +44,7 @@ impl HttpLayer {
         }
     }
 
-    /// [`Span`]s are constructed at the given level from client side.
+    /// [`Span`] are constructed at the given level from client side.
     pub fn client(level: Level) -> Self {
         Self {
             level,
@@ -194,6 +194,10 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
             });
         }
         SpanKind::Server => {
+            if let Some(http_route) = util::http_route(request) {
+                span.record("http.route", http_route);
+            }
+
             let context = opentelemetry::global::get_text_map_propagator(|extractor| {
                 extractor.extract(&HeaderExtractor(request.headers_mut()))
             });

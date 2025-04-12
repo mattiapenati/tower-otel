@@ -250,6 +250,11 @@ impl ResponseMetricState {
             if let Some(http_version) = util::http_version(req.version()) {
                 attributes.push(KeyValue::new("network.protocol.version", http_version));
             }
+
+            if let Some(http_route) = util::http_route(req) {
+                attributes.push(KeyValue::new("http.route", http_route.to_string()));
+            }
+
             attributes
         };
 
