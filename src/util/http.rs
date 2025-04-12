@@ -1,4 +1,5 @@
 use http::{Method, Request, Version};
+use http_body::Body;
 
 /// String representation of HTTP method
 pub fn http_method(method: &Method) -> &'static str {
@@ -29,17 +30,19 @@ pub fn http_version(version: Version) -> Option<&'static str> {
 }
 
 /// Get the size of the HTTP request body from the `Content-Length` header.
-pub fn http_request_size<B>(req: &Request<B>) -> Option<u64> {
+pub fn http_request_size<B: Body>(req: &Request<B>) -> Option<u64> {
     req.headers()
         .get("content-length")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
+        .or_else(|| req.body().size_hint().exact())
 }
 
 /// Get the size of the HTTP response body from the `Content-Length` header.
-pub fn http_response_size<B>(res: &http::Response<B>) -> Option<u64> {
+pub fn http_response_size<B: Body>(res: &http::Response<B>) -> Option<u64> {
     res.headers()
         .get("content-length")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
+        .or_else(|| res.body().size_hint().exact())
 }

@@ -1,3 +1,5 @@
+//! Middleware that adds metrics to a [`Service`] that handles HTTP requests.
+
 use std::{
     fmt::Display,
     future::Future,
@@ -8,6 +10,7 @@ use std::{
 };
 
 use http::{Request, Response};
+use http_body::Body;
 use opentelemetry::{
     metrics::{Histogram, Meter, UpDownCounter},
     KeyValue,
@@ -130,6 +133,8 @@ impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for Http<S>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
     S::Error: Display,
+    ReqBody: Body,
+    ResBody: Body,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -168,6 +173,7 @@ pub struct ResponseFuture<F> {
 impl<F, ResBody, E> Future for ResponseFuture<F>
 where
     F: Future<Output = Result<Response<ResBody>, E>>,
+    ResBody: Body,
     E: Display,
 {
     type Output = Result<Response<ResBody>, E>;
@@ -217,7 +223,7 @@ struct ResponseMetricState {
 }
 
 impl ResponseMetricState {
-    fn new<B>(req: &Request<B>) -> Self {
+    fn new<B: Body>(req: &Request<B>) -> Self {
         let start = Instant::now();
 
         let request_body_size = util::http_request_size(req);

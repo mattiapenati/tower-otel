@@ -34,6 +34,7 @@ autoexamples = false
 
 [dependencies]
 http = "1"
+http-body = "1"
 opentelemetry = "0.29"
 pin-project = "1"
 tower-layer = "0.3"
