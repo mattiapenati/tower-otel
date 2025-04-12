@@ -1,0 +1,18 @@
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-protoc@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack check --each-feature --no-dev-deps --all
+
