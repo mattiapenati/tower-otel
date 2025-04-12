@@ -1,16 +1,16 @@
 _default:
     @just -l
 
-# start jaeger
-jaeger-run:
-    docker run --rm --detach \
-        --name tower-otel-jaeger \
-        --env COLLECTOR_OTLP_ENABLED=true \
-        --publish 4317:4317 \
-        --publish 4318:4318 \
-        --publish 16686:16686 \
-        jaegertracing/all-in-one:1.51
+# start collector
+collector-run:
+  docker run --rm --detach \
+      --name opentelemetry-collector \
+      --publish 127.0.0.1:4317:4317 \
+      --publish 127.0.0.1:4318:4318 \
+      --publish 127.0.0.1:55679:55679 \
+      otel/opentelemetry-collector-contrib
 
-# kill jaeger
-jaeger-kill:
-    docker kill tower-otel-jaeger
+
+# kill collector
+collector-kill:
+  docker kill opentelemetry-collector

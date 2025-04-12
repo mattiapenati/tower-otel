@@ -2,6 +2,7 @@ use std::{
     future::{Future, IntoFuture},
     pin::Pin,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 
 use axum::{http::Request, routing::get, Router};
@@ -10,7 +11,7 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use pin_project::pin_project;
 use tower::{Service, ServiceBuilder, ServiceExt};
-use tower_otel::trace::HttpLayer;
+use tower_otel::{metrics, trace};
 use tracing::Level;
 use tracing_subscriber::{
     filter::LevelFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, Layer,
@@ -28,15 +29,15 @@ async fn main() {
         .with_attribute(opentelemetry::KeyValue::new("service.version", PKG_VERSION))
         .build();
 
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
+    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .build()
         .unwrap();
 
     let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
         .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
-        .with_resource(resource)
-        .with_batch_exporter(exporter)
+        .with_resource(resource.clone())
+        .with_batch_exporter(span_exporter)
         .build();
 
     let telemetry = tracing_opentelemetry::layer()
@@ -54,9 +55,27 @@ async fn main() {
         .with(fmt)
         .init();
 
+    let metrics_exporter = opentelemetry_otlp::MetricExporter::builder()
+        .with_tonic()
+        .build()
+        .unwrap();
+
+    let metrics_readers = opentelemetry_sdk::metrics::PeriodicReader::builder(metrics_exporter)
+        .with_interval(Duration::from_secs(2))
+        .build();
+
+    let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+        .with_reader(metrics_readers)
+        .with_resource(resource)
+        .build();
+
+    opentelemetry::global::set_meter_provider(meter_provider.clone());
+    let meter = opentelemetry::global::meter(PKG_NAME);
+
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
-        .layer(HttpLayer::server(Level::DEBUG));
+        .layer(trace::HttpLayer::server(Level::DEBUG))
+        .layer(metrics::HttpLayer::server(&meter));
     let listener = tokio::net::TcpListener::bind("[::1]:3000").await.unwrap();
     let server = axum::serve(listener, app).into_future();
     tokio::spawn(server);
@@ -66,7 +85,8 @@ async fn main() {
     let (request_sender, connection) = hyper::client::conn::http1::handshake(io).await.unwrap();
     tokio::spawn(connection);
     let mut client = ServiceBuilder::new()
-        .layer(HttpLayer::client(Level::DEBUG))
+        .layer(trace::HttpLayer::client(Level::DEBUG))
+        .layer(metrics::HttpLayer::client(&meter))
         .service(Client(request_sender));
 
     let req = Request::get("http://[::1]:3000")
@@ -77,6 +97,7 @@ async fn main() {
     let body = std::str::from_utf8(&body).unwrap();
     tracing::info!("received '{}'", body);
 
+    meter_provider.shutdown().unwrap();
     tracer_provider.shutdown().unwrap();
 }
 
