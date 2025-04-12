@@ -21,7 +21,7 @@ tracing-subscriber = "0.3"
 
 [package]
 name = "tower-otel"
-version = "0.4.0"
+version = "0.5.0"
 description = "OpenTelemetry layer for HTTP/gRPC services"
 keywords = ["opentelemetry", "tracing", "tower", "http", "grpc"]
 homepage = "https://github.com/mattiapenati/tower-otel"
