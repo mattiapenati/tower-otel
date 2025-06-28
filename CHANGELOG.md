@@ -1,3 +1,7 @@
+## [Unreleased]
+
+- Updated OpenTelemetry to v0.30.0
+
 ## v0.5.0
 
 - Add [axum](https://docs.rs/axum) support

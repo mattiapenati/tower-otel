@@ -14,3 +14,11 @@ collector-run:
 # kill collector
 collector-kill:
   docker kill opentelemetry-collector
+
+# run HTTP example
+example-http:
+  cargo run -p example-http --bin example-http
+
+# run gRPC example
+example-grpc:
+  cargo run -p example-grpc --bin example-grpc
