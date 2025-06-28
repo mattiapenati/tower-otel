@@ -1,4 +1,4 @@
-## [Unreleased]
+## v0.6.0
 
 - Updated OpenTelemetry to v0.30.0
 

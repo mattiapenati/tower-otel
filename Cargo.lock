@@ -1382,7 +1382,7 @@ checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
 
 [[package]]
 name = "tower-otel"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "axum",
  "cfg-if",
