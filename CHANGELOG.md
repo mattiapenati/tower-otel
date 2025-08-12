@@ -1,6 +1,7 @@
 ## v0.6.2 [Unreleased]
 
 - Update [`prost`] and [`tonic`] to v0.14 in gRPC example
+- Update lock file, this includes the update of [`slab`] to v0.4.11 (see [#153](https://github.com/tokio-rs/slab/pull/153))
 
 ## v0.6.0
 
@@ -16,4 +17,5 @@
 
 
 [`prost`]: https://crates.io/crates/prost
+[`slab`]: https://crates.io/crates/slab
 [`tonic`]: https://crates.io/crates/tonic
