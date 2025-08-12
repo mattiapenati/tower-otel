@@ -4,7 +4,8 @@
 [![Latest Version](https://docs.rs/tower-otel/badge.svg)](https://docs.rs/tower-otel)
 ![Apache 2.0 OR MIT licensed](https://img.shields.io/badge/license-Apache2.0%2FMIT-blue.svg)
 
-OpenTelemetry layer for HTTP/gRPC services.
+This crate provides an OpenTelemetry layer for HTTP and gRPC services built on top of [`tower`]. 
+The implementation is compliant to the semantic conventions defined for [HTTP spans](https://opentelemetry.io/docs/specs/semconv/http/) and  [RPC](https://opentelemetry.io/docs/specs/semconv/rpc/).
 
 ## License
 
@@ -15,3 +16,4 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
 be dual licensed as above, without any additional terms or conditions.
 
+[`tower`]: https://crates.io/crates/tower
