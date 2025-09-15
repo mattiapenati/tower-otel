@@ -161,6 +161,7 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 "url.full" = Empty,
                 "url.path" = request.uri().path(),
                 "url.query" = Empty,
+                "url.scheme" = Empty,
             )
         }};
     }
@@ -188,6 +189,10 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
         SpanKind::Client => {
             span.record("url.full", tracing::field::display(request.uri()));
 
+            if let Some(url_scheme) = request.uri().scheme_str() {
+                span.record("url.scheme", url_scheme);
+            }
+
             let context = span.context();
             opentelemetry::global::get_text_map_propagator(|injector| {
                 injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
@@ -196,6 +201,10 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
         SpanKind::Server => {
             if let Some(http_route) = util::http_route(request) {
                 span.record("http.route", http_route);
+            }
+
+            if let Some(url_scheme) = util::http_url_scheme(request) {
+                span.record("url.scheme", url_scheme);
             }
 
             let context = opentelemetry::global::get_text_map_propagator(|extractor| {

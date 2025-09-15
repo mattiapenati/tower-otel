@@ -21,8 +21,18 @@ use tower_service::Service;
 
 use crate::util;
 
+/// The side from which metrics are recorded.
+#[derive(Clone, Copy, Debug)]
+enum MetricSide {
+    /// The span describes a request sent to some remote service.
+    Client,
+    /// The span describes the server-side handling of a request.
+    Server,
+}
+
 #[derive(Debug)]
 struct MetricsRecord {
+    side: MetricSide,
     request_duration: Histogram<f64>,
     active_requests: UpDownCounter<i64>,
     request_body_size: Histogram<u64>,
@@ -32,6 +42,7 @@ struct MetricsRecord {
 impl MetricsRecord {
     fn server(meter: &Meter) -> Self {
         Self {
+            side: MetricSide::Server,
             request_duration: meter
                 .f64_histogram("http.server.request.duration")
                 .with_description("Duration of HTTP server requests")
@@ -60,6 +71,7 @@ impl MetricsRecord {
 
     fn client(meter: &Meter) -> Self {
         Self {
+            side: MetricSide::Client,
             request_duration: meter
                 .f64_histogram("http.client.request.duration")
                 .with_description("Duration of HTTP client requests")
@@ -145,7 +157,8 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let state = ResponseMetricState::new(&req);
+        let side = self.record.side;
+        let state = ResponseMetricState::new(side, &req);
         let record = Arc::clone(&self.record);
         let inner = self.inner.call(req);
 
@@ -223,7 +236,7 @@ struct ResponseMetricState {
 }
 
 impl ResponseMetricState {
-    fn new<B: Body>(req: &Request<B>) -> Self {
+    fn new<B: Body>(side: MetricSide, req: &Request<B>) -> Self {
         let start = Instant::now();
 
         let request_body_size = util::http_request_size(req);
@@ -241,6 +254,15 @@ impl ResponseMetricState {
 
             if let Some(server_port) = req.uri().port_u16() {
                 attributes.push(KeyValue::new("server.port", server_port as i64));
+            }
+
+            let url_scheme = match side {
+                // For client side the protocol is the URL.
+                MetricSide::Client => req.uri().scheme_str(),
+                MetricSide::Server => util::http_url_scheme(req),
+            };
+            if let Some(url_scheme) = url_scheme {
+                attributes.push(KeyValue::new("url.scheme", url_scheme.to_string()));
             }
 
             active_requests_attributes = attributes.len();
