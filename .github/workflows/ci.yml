@@ -13,10 +13,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack,cargo-nextest
       - name: Cargo check
         run: cargo hack check --each-feature --no-dev-deps --all
       - name: Cargo clippy
         run: cargo hack clippy --each-feature --no-dev-deps --all
+      - name: Cargo nextest
+        run: cargo hack nextest run --each-feature --no-dev-deps -p tower-otel
       - name: Check semver
         uses: obi1kenobi/cargo-semver-checks-action@v2
