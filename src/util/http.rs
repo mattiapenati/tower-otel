@@ -47,6 +47,51 @@ pub fn http_response_size<B: Body>(res: &http::Response<B>) -> Option<u64> {
         .or_else(|| res.body().size_hint().exact())
 }
 
+/// Get the url scheme from the request.
+pub fn http_url_scheme<B>(req: &Request<B>) -> Option<&'static str> {
+    // Comments in this function are quoted from MDN.
+    //
+    // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-Proto
+
+    // The HTTP X-Forwarded-Proto (XFP) request header is a de-facto standard header
+    // for identifying the protocol (HTTP or HTTPS) that a client used to connect to a proxy or
+    // load balancer.
+    let x_forwarded_proto = req
+        .headers()
+        .get("x-forwarded-proto")
+        .and_then(|v| match v.to_str() {
+            Ok(value) if value.eq_ignore_ascii_case("http") => Some("http"),
+            Ok(value) if value.eq_ignore_ascii_case("https") => Some("https"),
+            _ => None,
+        });
+    if let Some(x_forwarded_proto) = x_forwarded_proto {
+        return Some(x_forwarded_proto);
+    }
+
+    // A standardized version of this header is the HTTP Forwarded header, although it's much less
+    // frequently used.
+    req.headers()
+        .get("forwarded")
+        .and_then(|v| extract_proto_from_forwarded_header(v.as_bytes()))
+}
+
+fn extract_proto_from_forwarded_header(header_value: &[u8]) -> Option<&'static str> {
+    for value_per_proxy in header_value.split(|c| *c == b',') {
+        for directive in value_per_proxy.split(|c| *c == b';') {
+            let directive = directive.trim_ascii().to_ascii_lowercase();
+
+            if let Some(proto) = directive.strip_prefix(b"proto=") {
+                return match proto {
+                    b"http" => Some("http"),
+                    b"https" => Some("https"),
+                    _ => None,
+                };
+            }
+        }
+    }
+    None
+}
+
 cfg_if::cfg_if! {
     if #[cfg(feature = "axum")] {
         pub fn http_route<B>(req: &http::Request<B>) -> Option<&str> {
@@ -57,5 +102,24 @@ cfg_if::cfg_if! {
         pub fn http_route<B>(_req: &http::Request<B>) -> Option<&str> {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_forwarded_parser() {
+        assert_eq!(
+            extract_proto_from_forwarded_header(b"for=192.0.2.60;proto=http;by=203.0.113.43"),
+            Some("http")
+        );
+
+        // Case insensitive
+        assert_eq!(
+            extract_proto_from_forwarded_header(b"Proto=httpS;by=203.0.113.43"),
+            Some("https")
+        );
     }
 }

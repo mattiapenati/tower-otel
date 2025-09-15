@@ -1,3 +1,9 @@
+## [Unreleased]
+
+- Add `url.scheme` attribute to HTTP spans/metrics. For client request the
+  value is extracted from the request URL. For server request the value is
+  extracted from `X-Forwarded-Proto` and `Forwarded` headers.
+
 ## v0.6.2
 
 - Update [`prost`] and [`tonic`] to v0.14 in gRPC example
