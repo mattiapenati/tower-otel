@@ -35,6 +35,7 @@ autoexamples = false
 [dependencies]
 axum = { version = "0.8", optional = true, default-features = false, features = [
   "matched-path",
+  "tokio",
 ] }
 cfg-if = "1"
 http = "1"
