@@ -151,6 +151,8 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
             tracing::span!(
                 $level,
                 "HTTP",
+                "client.address" = Empty,
+                "client.port" = Empty,
                 "error.message" = Empty,
                 "http.request.method" = util::http_method(request.method()),
                 "http.response.status_code" = Empty,
@@ -215,6 +217,11 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
         SpanKind::Server => {
             if let Some(http_route) = util::http_route(request) {
                 span.record("http.route", http_route);
+            }
+            if let Some(client_address) = util::client_address(request) {
+                let ip = client_address.ip();
+                span.record("client.address", tracing::field::display(ip));
+                span.record("client.port", client_address.port());
             }
 
             let util::HttpRequestAttributes {

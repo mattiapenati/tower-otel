@@ -1,5 +1,6 @@
 use std::{
     future::{Future, IntoFuture},
+    net::SocketAddr,
     pin::Pin,
     task::{ready, Context, Poll},
     time::Duration,
@@ -75,7 +76,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .layer(trace::HttpLayer::server(Level::DEBUG))
-        .layer(metrics::HttpLayer::server(&meter));
+        .layer(metrics::HttpLayer::server(&meter))
+        .into_make_service_with_connect_info::<SocketAddr>();
     let listener = tokio::net::TcpListener::bind("[::1]:3000").await.unwrap();
     let server = axum::serve(listener, app).into_future();
     tokio::spawn(server);

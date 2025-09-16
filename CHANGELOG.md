@@ -8,6 +8,9 @@
   gRPC spans. For client request the value is extracted from the request URL.
   For server request the value is extracted from request following [these rules].
 
+- Add `client.address` attributes to server spans when `axum` feature is
+  enabled.
+
 ## v0.6.2
 
 - Update [`prost`] and [`tonic`] to v0.14 in gRPC example

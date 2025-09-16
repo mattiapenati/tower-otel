@@ -146,6 +146,8 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
             tracing::span!(
                 $level,
                 "GRPC",
+                "client.address" = Empty,
+                "client.port" = Empty,
                 "error.message" = Empty,
                 "otel.kind" = span_kind(kind),
                 "otel.name" = Empty,
@@ -204,6 +206,12 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
             });
         }
         SpanKind::Server => {
+            if let Some(client_address) = util::client_address(request) {
+                let ip = client_address.ip();
+                span.record("client.address", tracing::field::display(ip));
+                span.record("client.port", client_address.port());
+            }
+
             let util::HttpRequestAttributes {
                 server_address,
                 server_port,

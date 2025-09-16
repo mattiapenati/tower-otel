@@ -109,6 +109,7 @@ impl ByteSliceExt for [u8] {
 }
 
 /// Attributes related to HTTP requests.
+#[derive(Debug)]
 pub struct HttpRequestAttributes<'a> {
     pub url_scheme: Option<&'a str>,
     pub server_address: Option<&'a str>,
@@ -187,10 +188,23 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "axum")] {
         pub fn http_route<B>(req: &http::Request<B>) -> Option<&str> {
             use axum::extract::MatchedPath;
-            req.extensions().get::<MatchedPath>().map(|matched_path| matched_path.as_str())
+            req.extensions()
+                .get::<MatchedPath>()
+                .map(|matched_path| matched_path.as_str())
+        }
+
+        pub fn client_address<B>(req: &http::Request<B>) -> Option<&'_ std::net::SocketAddr> {
+            use axum::extract::ConnectInfo;
+            req.extensions()
+                .get::<ConnectInfo<std::net::SocketAddr>>()
+                .map(|ConnectInfo(addr)| addr)
         }
     } else {
         pub fn http_route<B>(_req: &http::Request<B>) -> Option<&str> {
+            None
+        }
+
+        pub fn client_address<B>(_req: &http::Request<B>) -> Option<&'_ std::net::SocketAddr> {
             None
         }
     }
