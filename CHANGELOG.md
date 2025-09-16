@@ -1,4 +1,4 @@
-## [Unreleased]
+## v0.7.0
 
 - Add `url.scheme` attribute to HTTP spans/metrics. For client request the
   value is extracted from the request URL. For server request the value is
