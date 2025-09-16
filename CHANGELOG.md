@@ -4,6 +4,10 @@
   value is extracted from the request URL. For server request the value is
   extracted from `X-Forwarded-Proto` and `Forwarded` headers.
 
+- Add `server.address` and `server.port` attributes to HTTP spans. For client
+  request the value is extracted from the request URL. For server request the
+  value is extracted from request following [these rules].
+
 ## v0.6.2
 
 - Update [`prost`] and [`tonic`] to v0.14 in gRPC example
@@ -25,3 +29,5 @@
 [`prost`]: https://crates.io/crates/prost
 [`slab`]: https://crates.io/crates/slab
 [`tonic`]: https://crates.io/crates/tonic
+
+[these rules]: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#setting-serveraddress-and-serverport-attributes

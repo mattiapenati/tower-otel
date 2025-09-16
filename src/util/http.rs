@@ -1,6 +1,12 @@
 use http::{Method, Request, Version};
 use http_body::Body;
 
+pub const HTTP_DEFAULT_PORT: u16 = 80;
+pub const HTTPS_DEFAULT_PORT: u16 = 443;
+
+pub const X_FORWARDED_PROTO: http::HeaderName = http::HeaderName::from_static("x-forwarded-proto");
+pub const X_FORWARDED_HOST: http::HeaderName = http::HeaderName::from_static("x-forwarded-host");
+
 /// String representation of HTTP method
 pub fn http_method(method: &Method) -> &'static str {
     match *method {
@@ -47,49 +53,57 @@ pub fn http_response_size<B: Body>(res: &http::Response<B>) -> Option<u64> {
         .or_else(|| res.body().size_hint().exact())
 }
 
-/// Get the url scheme from the request.
-pub fn http_url_scheme<B>(req: &Request<B>) -> Option<&'static str> {
-    // Comments in this function are quoted from MDN.
-    //
-    // See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-Proto
-
-    // The HTTP X-Forwarded-Proto (XFP) request header is a de-facto standard header
-    // for identifying the protocol (HTTP or HTTPS) that a client used to connect to a proxy or
-    // load balancer.
-    let x_forwarded_proto = req
-        .headers()
-        .get("x-forwarded-proto")
-        .and_then(|v| match v.to_str() {
-            Ok(value) if value.eq_ignore_ascii_case("http") => Some("http"),
-            Ok(value) if value.eq_ignore_ascii_case("https") => Some("https"),
-            _ => None,
-        });
-    if let Some(x_forwarded_proto) = x_forwarded_proto {
-        return Some(x_forwarded_proto);
-    }
-
-    // A standardized version of this header is the HTTP Forwarded header, although it's much less
-    // frequently used.
-    req.headers()
-        .get("forwarded")
-        .and_then(|v| extract_proto_from_forwarded_header(v.as_bytes()))
+/// Parsed `Forwarded` header.
+pub struct Forwarded<'a> {
+    pub host: Option<&'a str>,
+    pub proto: Option<&'a str>,
 }
 
-fn extract_proto_from_forwarded_header(header_value: &[u8]) -> Option<&'static str> {
-    for value_per_proxy in header_value.split(|c| *c == b',') {
-        for directive in value_per_proxy.split(|c| *c == b';') {
-            let directive = directive.trim_ascii().to_ascii_lowercase();
+impl<'a> Forwarded<'a> {
+    /// Parse the `Forwarded` header value.
+    pub fn parse_header_value(header_value: &'a http::HeaderValue) -> Self {
+        let header_value = header_value.as_bytes();
+        let proxies = header_value.split(|c| *c == b',');
+        let Some(proxy) = proxies.last() else {
+            return Forwarded {
+                host: None,
+                proto: None,
+            };
+        };
 
-            if let Some(proto) = directive.strip_prefix(b"proto=") {
-                return match proto {
-                    b"http" => Some("http"),
-                    b"https" => Some("https"),
-                    _ => None,
-                };
+        let mut host = None;
+        let mut proto = None;
+
+        let directives = proxy.split(|c| *c == b';');
+        for directive in directives {
+            let directive = directive.trim_ascii();
+            if let Some(directive_host) = directive.strip_prefix_ignore_ascii_case(b"host=") {
+                host = std::str::from_utf8(directive_host).ok();
+            }
+            if let Some(directive_proto) = directive.strip_prefix_ignore_ascii_case(b"proto=") {
+                proto = std::str::from_utf8(directive_proto).ok();
             }
         }
+
+        Self { host, proto }
     }
-    None
+}
+
+trait ByteSliceExt {
+    fn strip_prefix_ignore_ascii_case(&self, prefix: &[u8]) -> Option<&[u8]>;
+}
+
+impl ByteSliceExt for [u8] {
+    fn strip_prefix_ignore_ascii_case(&self, prefix: &[u8]) -> Option<&[u8]> {
+        if self.len() < prefix.len() {
+            return None;
+        }
+
+        self.iter()
+            .zip(prefix.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+            .then(|| &self[prefix.len()..])
+    }
 }
 
 cfg_if::cfg_if! {
@@ -111,15 +125,17 @@ mod tests {
 
     #[test]
     fn check_forwarded_parser() {
-        assert_eq!(
-            extract_proto_from_forwarded_header(b"for=192.0.2.60;proto=http;by=203.0.113.43"),
-            Some("http")
-        );
+        let header_value =
+            http::HeaderValue::from_static("for=192.0.2.60;proto=http;by=203.0.113.43");
+        let forwarded = Forwarded::parse_header_value(&header_value);
 
-        // Case insensitive
-        assert_eq!(
-            extract_proto_from_forwarded_header(b"Proto=httpS;by=203.0.113.43"),
-            Some("https")
-        );
+        assert_eq!(forwarded.host, None);
+        assert_eq!(forwarded.proto, Some("http"));
+
+        let header_value = http::HeaderValue::from_static("Proto=https;by=203.0.113.43");
+        let forwarded = Forwarded::parse_header_value(&header_value);
+
+        assert_eq!(forwarded.host, None);
+        assert_eq!(forwarded.proto, Some("https"));
     }
 }
