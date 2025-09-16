@@ -1,11 +1,13 @@
+use std::str::FromStr;
+
 use http::{Method, Request, Version};
 use http_body::Body;
 
-pub const HTTP_DEFAULT_PORT: u16 = 80;
-pub const HTTPS_DEFAULT_PORT: u16 = 443;
+const HTTP_DEFAULT_PORT: u16 = 80;
+const HTTPS_DEFAULT_PORT: u16 = 443;
 
-pub const X_FORWARDED_PROTO: http::HeaderName = http::HeaderName::from_static("x-forwarded-proto");
-pub const X_FORWARDED_HOST: http::HeaderName = http::HeaderName::from_static("x-forwarded-host");
+const X_FORWARDED_PROTO: http::HeaderName = http::HeaderName::from_static("x-forwarded-proto");
+const X_FORWARDED_HOST: http::HeaderName = http::HeaderName::from_static("x-forwarded-host");
 
 /// String representation of HTTP method
 pub fn http_method(method: &Method) -> &'static str {
@@ -54,17 +56,17 @@ pub fn http_response_size<B: Body>(res: &http::Response<B>) -> Option<u64> {
 }
 
 /// Parsed `Forwarded` header.
-pub struct Forwarded<'a> {
-    pub host: Option<&'a str>,
-    pub proto: Option<&'a str>,
+struct Forwarded<'a> {
+    host: Option<&'a str>,
+    proto: Option<&'a str>,
 }
 
 impl<'a> Forwarded<'a> {
     /// Parse the `Forwarded` header value.
-    pub fn parse_header_value(header_value: &'a http::HeaderValue) -> Self {
+    fn parse_header_value(header_value: &'a http::HeaderValue) -> Self {
         let header_value = header_value.as_bytes();
-        let proxies = header_value.split(|c| *c == b',');
-        let Some(proxy) = proxies.last() else {
+        let mut proxies = header_value.split(|c| *c == b',');
+        let Some(proxy) = proxies.next_back() else {
             return Forwarded {
                 host: None,
                 proto: None,
@@ -103,6 +105,81 @@ impl ByteSliceExt for [u8] {
             .zip(prefix.iter())
             .all(|(a, b)| a.eq_ignore_ascii_case(b))
             .then(|| &self[prefix.len()..])
+    }
+}
+
+/// Attributes related to HTTP requests.
+pub struct HttpRequestAttributes<'a> {
+    pub url_scheme: Option<&'a str>,
+    pub server_address: Option<&'a str>,
+    pub server_port: Option<u16>,
+}
+
+impl<'a> HttpRequestAttributes<'a> {
+    /// Extract HTTP request attributes from a sent request.
+    pub fn from_sent_request<B>(request: &'a Request<B>) -> Self {
+        let url_scheme = request.uri().scheme_str();
+        let server_address = request.uri().host();
+        let server_port = request.uri().port_u16().or(match url_scheme {
+            Some("http") => Some(HTTP_DEFAULT_PORT),
+            Some("https") => Some(HTTPS_DEFAULT_PORT),
+            _ => None,
+        });
+
+        Self {
+            url_scheme,
+            server_address,
+            server_port,
+        }
+    }
+
+    /// Extract HTTP request attributes from a received request.
+    pub fn from_recv_request<B>(request: &'a Request<B>) -> Self {
+        let (host, url_scheme) = request
+            .headers()
+            .get(http::header::FORWARDED)
+            .map(Forwarded::parse_header_value)
+            .map(|Forwarded { host, proto }| (host, proto))
+            .unwrap_or_default();
+
+        let host = host
+            .or_else(|| {
+                request
+                    .headers()
+                    .get(X_FORWARDED_HOST)
+                    .and_then(|v| v.to_str().ok())
+            })
+            .or_else(|| {
+                request
+                    .headers()
+                    .get(http::header::HOST)
+                    .and_then(|v| v.to_str().ok())
+            });
+
+        let url_scheme = url_scheme.or_else(|| {
+            request
+                .headers()
+                .get(X_FORWARDED_PROTO)
+                .and_then(|v| v.to_str().ok())
+        });
+
+        let (server_address, server_port) = host
+            .and_then(|host| host.split_once(':'))
+            .map_or_else(|| (host, None), |(host, port)| (Some(host), Some(port)));
+
+        let server_port = server_port
+            .and_then(|server_port| u16::from_str(server_port).ok())
+            .or(match url_scheme {
+                Some("http") => Some(HTTP_DEFAULT_PORT),
+                Some("https") => Some(HTTPS_DEFAULT_PORT),
+                _ => None,
+            });
+
+        Self {
+            url_scheme,
+            server_address,
+            server_port,
+        }
     }
 }
 
