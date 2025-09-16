@@ -4,6 +4,7 @@ use std::{
     fmt::Display,
     future::Future,
     pin::Pin,
+    str::FromStr,
     task::{ready, Context, Poll},
 };
 
@@ -158,6 +159,8 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 "network.protocol.version" = util::http_version(request.version()),
                 "otel.kind" = span_kind(kind),
                 "otel.status_code" = Empty,
+                "server.address" = Empty,
+                "server.port" = Empty,
                 "url.full" = Empty,
                 "url.path" = request.uri().path(),
                 "url.query" = Empty,
@@ -189,7 +192,21 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
         SpanKind::Client => {
             span.record("url.full", tracing::field::display(request.uri()));
 
-            if let Some(url_scheme) = request.uri().scheme_str() {
+            let url_scheme = request.uri().scheme_str();
+            let server_address = request.uri().host();
+            let server_port = request.uri().port_u16().or(match url_scheme {
+                Some("http") => Some(util::HTTP_DEFAULT_PORT),
+                Some("https") => Some(util::HTTPS_DEFAULT_PORT),
+                _ => None,
+            });
+
+            if let Some(server_address) = server_address {
+                span.record("server.address", server_address);
+            }
+            if let Some(server_port) = server_port {
+                span.record("server.port", server_port);
+            }
+            if let Some(url_scheme) = url_scheme {
                 span.record("url.scheme", url_scheme);
             }
 
@@ -203,7 +220,53 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 span.record("http.route", http_route);
             }
 
-            if let Some(url_scheme) = util::http_url_scheme(request) {
+            let (host, url_scheme) = request
+                .headers()
+                .get(http::header::FORWARDED)
+                .map(util::Forwarded::parse_header_value)
+                .map(|util::Forwarded { host, proto }| (host, proto))
+                .unwrap_or_default();
+
+            let host = host
+                .or_else(|| {
+                    request
+                        .headers()
+                        .get(util::X_FORWARDED_HOST)
+                        .and_then(|v| v.to_str().ok())
+                })
+                .or_else(|| {
+                    request
+                        .headers()
+                        .get(http::header::HOST)
+                        .and_then(|v| v.to_str().ok())
+                });
+
+            let url_scheme = url_scheme.or_else(|| {
+                request
+                    .headers()
+                    .get(util::X_FORWARDED_PROTO)
+                    .and_then(|v| v.to_str().ok())
+            });
+
+            let (server_address, server_port) = host
+                .and_then(|host| host.split_once(':'))
+                .map_or_else(|| (host, None), |(host, port)| (Some(host), Some(port)));
+
+            let server_port = server_port
+                .and_then(|server_port| u16::from_str(server_port).ok())
+                .or(match url_scheme {
+                    Some("http") => Some(util::HTTP_DEFAULT_PORT),
+                    Some("https") => Some(util::HTTPS_DEFAULT_PORT),
+                    _ => None,
+                });
+
+            if let Some(server_address) = server_address {
+                span.record("server.address", server_address);
+            }
+            if let Some(server_port) = server_port {
+                span.record("server.port", server_port);
+            }
+            if let Some(url_scheme) = url_scheme {
                 span.record("url.scheme", url_scheme);
             }
 
