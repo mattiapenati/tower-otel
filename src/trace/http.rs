@@ -4,7 +4,6 @@ use std::{
     fmt::Display,
     future::Future,
     pin::Pin,
-    str::FromStr,
     task::{ready, Context, Poll},
 };
 
@@ -192,13 +191,11 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
         SpanKind::Client => {
             span.record("url.full", tracing::field::display(request.uri()));
 
-            let url_scheme = request.uri().scheme_str();
-            let server_address = request.uri().host();
-            let server_port = request.uri().port_u16().or(match url_scheme {
-                Some("http") => Some(util::HTTP_DEFAULT_PORT),
-                Some("https") => Some(util::HTTPS_DEFAULT_PORT),
-                _ => None,
-            });
+            let util::HttpRequestAttributes {
+                url_scheme,
+                server_address,
+                server_port,
+            } = util::HttpRequestAttributes::from_sent_request(request);
 
             if let Some(server_address) = server_address {
                 span.record("server.address", server_address);
@@ -220,45 +217,11 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 span.record("http.route", http_route);
             }
 
-            let (host, url_scheme) = request
-                .headers()
-                .get(http::header::FORWARDED)
-                .map(util::Forwarded::parse_header_value)
-                .map(|util::Forwarded { host, proto }| (host, proto))
-                .unwrap_or_default();
-
-            let host = host
-                .or_else(|| {
-                    request
-                        .headers()
-                        .get(util::X_FORWARDED_HOST)
-                        .and_then(|v| v.to_str().ok())
-                })
-                .or_else(|| {
-                    request
-                        .headers()
-                        .get(http::header::HOST)
-                        .and_then(|v| v.to_str().ok())
-                });
-
-            let url_scheme = url_scheme.or_else(|| {
-                request
-                    .headers()
-                    .get(util::X_FORWARDED_PROTO)
-                    .and_then(|v| v.to_str().ok())
-            });
-
-            let (server_address, server_port) = host
-                .and_then(|host| host.split_once(':'))
-                .map_or_else(|| (host, None), |(host, port)| (Some(host), Some(port)));
-
-            let server_port = server_port
-                .and_then(|server_port| u16::from_str(server_port).ok())
-                .or(match url_scheme {
-                    Some("http") => Some(util::HTTP_DEFAULT_PORT),
-                    Some("https") => Some(util::HTTPS_DEFAULT_PORT),
-                    _ => None,
-                });
+            let util::HttpRequestAttributes {
+                url_scheme,
+                server_address,
+                server_port,
+            } = util::HttpRequestAttributes::from_recv_request(request);
 
             if let Some(server_address) = server_address {
                 span.record("server.address", server_address);

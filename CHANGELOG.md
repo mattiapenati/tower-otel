@@ -1,12 +1,12 @@
-## [Unreleased]
+## v0.7.0
 
 - Add `url.scheme` attribute to HTTP spans/metrics. For client request the
   value is extracted from the request URL. For server request the value is
   extracted from `X-Forwarded-Proto` and `Forwarded` headers.
 
-- Add `server.address` and `server.port` attributes to HTTP spans. For client
-  request the value is extracted from the request URL. For server request the
-  value is extracted from request following [these rules].
+- Add `server.address` and `server.port` attributes to HTTP spans/metrics and
+  gRPC spans. For client request the value is extracted from the request URL.
+  For server request the value is extracted from request following [these rules].
 
 ## v0.6.2
 

@@ -14,7 +14,10 @@ use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::trace::{extractor::HeaderExtractor, injector::HeaderInjector};
+use crate::{
+    trace::{extractor::HeaderExtractor, injector::HeaderInjector},
+    util,
+};
 
 /// Describes the relationship between the [`Span`] and the service producing the span.
 #[derive(Clone, Copy, Debug)]
@@ -151,6 +154,8 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 "rpc.method" = Empty,
                 "rpc.service" = Empty,
                 "rpc.system" = "grpc",
+                "server.address" = Empty,
+                "server.port" = Empty,
             )
         }};
     }
@@ -180,12 +185,38 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
 
     match kind {
         SpanKind::Client => {
+            let util::HttpRequestAttributes {
+                server_address,
+                server_port,
+                ..
+            } = util::HttpRequestAttributes::from_sent_request(request);
+
+            if let Some(server_address) = server_address {
+                span.record("server.address", server_address);
+            }
+            if let Some(server_port) = server_port {
+                span.record("server.port", server_port);
+            }
+
             let context = span.context();
             opentelemetry::global::get_text_map_propagator(|injector| {
                 injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
             });
         }
         SpanKind::Server => {
+            let util::HttpRequestAttributes {
+                server_address,
+                server_port,
+                ..
+            } = util::HttpRequestAttributes::from_recv_request(request);
+
+            if let Some(server_address) = server_address {
+                span.record("server.address", server_address);
+            }
+            if let Some(server_port) = server_port {
+                span.record("server.port", server_port);
+            }
+
             let context = opentelemetry::global::get_text_map_propagator(|extractor| {
                 extractor.extract(&HeaderExtractor(request.headers_mut()))
             });
