@@ -17,7 +17,7 @@ collector-kill:
 
 # run HTTP example
 example-http:
-  cargo run -p example-http --bin example-http
+  cargo run -p example-http --bin example-http --release
 
 # run gRPC example
 example-grpc:

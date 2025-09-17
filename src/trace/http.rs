@@ -87,6 +87,9 @@ where
     }
 
     fn call(&mut self, mut req: Request<ReqBody>) -> Self::Future {
+        #[cfg(feature = "puffin")]
+        puffin::profile_function!();
+
         let span = make_request_span(self.level, self.kind, &mut req);
         let inner = {
             let _enter = span.enter();
@@ -121,7 +124,14 @@ where
         let this = self.project();
         let _enter = this.span.enter();
 
-        match ready!(this.inner.poll(cx)) {
+        let result = {
+            #[cfg(feature = "puffin")]
+            puffin::profile_scope!("inner::poll");
+
+            ready!(this.inner.poll(cx))
+        };
+
+        match result {
             Ok(response) => {
                 record_response(this.span, *this.kind, &response);
                 Poll::Ready(Ok(response))
@@ -144,6 +154,9 @@ fn span_kind(kind: SpanKind) -> &'static str {
 
 /// Creates a new [`Span`] for the given request.
 fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) -> Span {
+    #[cfg(feature = "puffin")]
+    puffin::profile_function!();
+
     macro_rules! make_span {
         ($level:expr) => {{
             use tracing::field::Empty;

@@ -20,7 +20,19 @@ use tracing_subscriber::{
 
 #[tokio::main]
 async fn main() {
+    let puffin_addr = format!("127.0.0.1:{}", puffin_http::DEFAULT_PORT);
+    let _puffin_server = puffin_http::Server::new(&puffin_addr).unwrap();
+    puffin::set_scopes_on(true);
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+
+    eprintln!("Run this to view profiling data:  puffin_viewer --url {puffin_addr}");
+    let confirmation = dialoguer::Confirm::new()
+        .with_prompt("Do you want to continue?")
+        .interact()
+        .unwrap();
+    if !confirmation {
+        return;
+    }
 
     const PKG_NAME: &str = env!("CARGO_PKG_NAME");
     const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -74,7 +86,13 @@ async fn main() {
     let meter = opentelemetry::global::meter(PKG_NAME);
 
     let app = Router::new()
-        .route("/", get(|| async { "Hello, World!" }))
+        .route(
+            "/",
+            get(|| async {
+                puffin::GlobalProfiler::lock().new_frame();
+                "Hello, World!"
+            }),
+        )
         .layer(trace::HttpLayer::server(Level::DEBUG))
         .layer(metrics::HttpLayer::server(&meter))
         .into_make_service_with_connect_info::<SocketAddr>();

@@ -10,19 +10,22 @@ axum = { version = "0.8", default-features = false, features = [
   "http1",
   "tokio",
 ] }
+dialoguer = "0.12"
 hyper = { version = "1", features = ["http1", "client"] }
 http-body-util = "0.1"
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
 pin-project = "1"
+puffin = "0.19"
+puffin_http = "0.16"
 tokio = { version = "1", default-features = false, features = [
   "macros",
   "rt",
   "rt-multi-thread",
 ] }
 tower = { version = "0.5", default-features = false }
-tower-otel = { workspace = true, features = ["axum"] }
+tower-otel = { workspace = true, features = ["axum", "puffin"] }
 tracing.workspace = true
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
