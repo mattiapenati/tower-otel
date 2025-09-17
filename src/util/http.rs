@@ -57,8 +57,8 @@ pub fn http_response_size<B: Body>(res: &http::Response<B>) -> Option<u64> {
 
 /// Parsed `Forwarded` header.
 struct Forwarded<'a> {
-    pub host: Option<&'a str>,
-    pub proto: Option<&'a str>,
+    host: Option<&'a str>,
+    proto: Option<&'a str>,
 }
 
 impl<'a> Forwarded<'a> {
