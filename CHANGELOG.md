@@ -1,3 +1,7 @@
+## Unreleased
+
+- Update [`opentelemetry`]` to v0.31.0
+
 ## v0.7.0
 
 - Add `url.scheme` attribute to HTTP spans/metrics. For client request the
@@ -29,6 +33,7 @@
 - Add metrics for HTTP services
 
 
+[`opentelemetry`]: https://crates.io/crates/opentelemetry
 [`prost`]: https://crates.io/crates/prost
 [`slab`]: https://crates.io/crates/slab
 [`tonic`]: https://crates.io/crates/tonic
