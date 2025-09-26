@@ -7,13 +7,13 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [workspace.dependencies]
-opentelemetry = { version = "0.30.0", features = ["metrics"] }
-opentelemetry-otlp = { version = "0.30", features = [
+opentelemetry = { version = "0.31", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.31", features = [
   "grpc-tonic",
   "metrics",
   "trace",
 ] }
-opentelemetry_sdk = { version = "0.30", features = ["metrics", "rt-tokio"] }
+opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio"] }
 tower-otel = { path = "." }
 tracing = "0.1"
 tracing-opentelemetry = "0.31"
@@ -40,7 +40,7 @@ axum = { version = "0.8", optional = true, default-features = false, features = 
 cfg-if = "1"
 http = "1"
 http-body = "1"
-opentelemetry = { version = "0.30", default-features = false }
+opentelemetry = { version = "0.31", default-features = false }
 pin-project = "1"
 tower-layer = "0.3"
 tower-service = "0.3"
