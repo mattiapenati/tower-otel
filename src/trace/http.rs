@@ -243,7 +243,9 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
             let context = opentelemetry::global::get_text_map_propagator(|extractor| {
                 extractor.extract(&HeaderExtractor(request.headers_mut()))
             });
-            span.set_parent(context);
+            if let Err(err) = span.set_parent(context) {
+                tracing::warn!("Failed to set parent span: {err}");
+            }
         }
     }
 
