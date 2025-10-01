@@ -16,7 +16,7 @@ opentelemetry-otlp = { version = "0.31", features = [
 opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio"] }
 tower-otel = { path = "." }
 tracing = "0.1"
-tracing-opentelemetry = "0.31"
+tracing-opentelemetry = "0.32"
 tracing-subscriber = "0.3"
 
 [package]
@@ -40,12 +40,14 @@ axum = { version = "0.8", optional = true, default-features = false, features = 
 cfg-if = "1"
 http = "1"
 http-body = "1"
-opentelemetry = { version = "0.31", default-features = false }
+opentelemetry = { version = "0.31", default-features = false, features = [
+  "metrics",
+] }
 pin-project = "1"
 tower-layer = "0.3"
 tower-service = "0.3"
 tracing = { version = "0.1", default-features = false }
-tracing-opentelemetry = { version = "0.31", default-features = false }
+tracing-opentelemetry = { version = "0.32", default-features = false }
 
 [features]
 default = []

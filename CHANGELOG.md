@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Update [`opentelemetry`]` to v0.31.0
+- Update [`tracing-opentelemetry`]` to v0.32.0
 
 ## v0.7.0
 
@@ -32,10 +33,10 @@
 
 - Add metrics for HTTP services
 
-
 [`opentelemetry`]: https://crates.io/crates/opentelemetry
 [`prost`]: https://crates.io/crates/prost
 [`slab`]: https://crates.io/crates/slab
 [`tonic`]: https://crates.io/crates/tonic
+[`tracing-opentelemetry`]: https://crates.io/crates/tracing-opentelemetry
 
 [these rules]: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#setting-serveraddress-and-serverport-attributes
