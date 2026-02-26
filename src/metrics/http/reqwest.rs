@@ -4,15 +4,14 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Instant,
 };
 
-use opentelemetry::KeyValue;
 use pin_project::pin_project;
 use tower_service::Service;
 
-use super::{Http, MetricSide, MetricsRecord, ResponseMetricState};
-use crate::util;
+use crate::util::http_body_size_from_headers;
+
+use super::{Http, MetricSide, MetricsRecord, RequestMetricData, ResponseMetricState};
 
 impl<S> Service<reqwest::Request> for Http<S>
 where
@@ -32,7 +31,8 @@ where
             matches!(self.record.side, MetricSide::Client),
             "Http metrics middleware with reqwest::Request only supports client-side metrics"
         );
-        let state = reqwest_metric_state(&req);
+        let data = RequestMetricData::from_reqwest(&req);
+        let state = ResponseMetricState::new(data);
         let record = Arc::clone(&self.record);
         let inner = self.inner.call(req);
 
@@ -68,101 +68,30 @@ where
         let this = self.project();
 
         let inner_response = ready!(this.inner.poll(cx));
-        let duration = this.state.elapsed_seconds();
 
-        // Push response attributes (can't use push_response_attributes since it expects
-        // http::Response<B>).
-        match &inner_response {
-            Ok(response) => {
-                this.state.attributes.push(KeyValue::new(
-                    "http.response.status_code",
-                    response.status().as_u16() as i64,
-                ));
-            }
-            Err(err) => {
-                this.state
-                    .attributes
-                    .push(KeyValue::new("error.type", err.to_string()));
-            }
-        }
+        this.state
+            .push_response_attributes(inner_response.as_ref().map(|r| r.status()));
 
-        this.record
-            .request_duration
-            .record(duration, this.state.attributes());
-
-        this.record
-            .active_requests
-            .add(-1, this.state.active_requests_attributes());
-
-        if let Some(request_body_size) = this.state.request_body_size {
-            this.record
-                .request_body_size
-                .record(request_body_size, this.state.attributes());
-        }
-
-        if let Ok(response) = inner_response.as_ref() {
-            if let Some(response_size) = response_content_length(response) {
-                this.record
-                    .response_body_size
-                    .record(response_size, this.state.attributes());
-            }
-        }
+        let response_body_size = inner_response
+            .as_ref()
+            .ok()
+            .and_then(|r| http_body_size_from_headers(r.headers()));
+        this.state.record_metrics(this.record, response_body_size);
 
         Poll::Ready(inner_response)
     }
 }
 
-/// Build a [`ResponseMetricState`] from a reqwest client request.
-fn reqwest_metric_state(req: &reqwest::Request) -> ResponseMetricState {
-    let start = Instant::now();
-
-    let request_body_size = req
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok());
-
-    let active_requests_attributes;
-    let attributes = {
-        let mut attributes = vec![];
-
-        let http_method = util::http_method(req.method());
-        attributes.push(KeyValue::new("http.request.method", http_method));
-
-        if let Some(server_address) = req.url().host_str() {
-            attributes.push(KeyValue::new("server.address", server_address.to_string()));
+impl<'a> RequestMetricData<'a> {
+    pub(super) fn from_reqwest(req: &'a reqwest::Request) -> Self {
+        Self {
+            method: req.method(),
+            server_address: req.url().host_str(),
+            server_port: req.url().port_or_known_default(),
+            url_scheme: Some(req.url().scheme()),
+            version: req.version(),
+            http_route: None,
+            body_size: http_body_size_from_headers(req.headers()),
         }
-
-        if let Some(server_port) = req.url().port_or_known_default() {
-            attributes.push(KeyValue::new("server.port", server_port as i64));
-        }
-
-        attributes.push(KeyValue::new("url.scheme", req.url().scheme().to_string()));
-
-        active_requests_attributes = attributes.len();
-
-        attributes.push(KeyValue::new("network.protocol.name", "http"));
-
-        if let Some(http_version) = util::http_version(req.version()) {
-            attributes.push(KeyValue::new("network.protocol.version", http_version));
-        }
-
-        attributes
-    };
-
-    ResponseMetricState {
-        start,
-        request_body_size,
-        attributes,
-        active_requests_attributes,
     }
-}
-
-/// Read response body size from the `content-length` header.
-fn response_content_length(response: &reqwest::Response) -> Option<u64> {
-    response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
 }

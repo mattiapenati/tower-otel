@@ -160,8 +160,8 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let side = self.record.side;
-        let state = ResponseMetricState::new(side, &req);
+        let data = RequestMetricData::from_http(self.record.side, &req);
+        let state = ResponseMetricState::new(data);
         let record = Arc::clone(&self.record);
         let inner = self.inner.call(req);
 
@@ -198,33 +198,51 @@ where
         let this = self.project();
 
         let inner_response = ready!(this.inner.poll(cx));
-        let duration = this.state.elapsed_seconds();
 
-        this.state.push_response_attributes(&inner_response);
+        this.state
+            .push_response_attributes(inner_response.as_ref().map(|r| r.status()));
 
-        this.record
-            .request_duration
-            .record(duration, this.state.attributes());
-
-        this.record
-            .active_requests
-            .add(-1, this.state.active_requests_attributes());
-
-        if let Some(request_body_size) = this.state.request_body_size {
-            this.record
-                .request_body_size
-                .record(request_body_size, this.state.attributes());
-        }
-
-        if let Ok(response) = inner_response.as_ref() {
-            if let Some(response_size) = util::http_response_size(response) {
-                this.record
-                    .response_body_size
-                    .record(response_size, this.state.attributes());
-            }
-        }
+        let response_body_size = inner_response
+            .as_ref()
+            .ok()
+            .and_then(util::http_response_size);
+        this.state.record_metrics(this.record, response_body_size);
 
         Poll::Ready(inner_response)
+    }
+}
+
+/// Data extracted from an HTTP request used to build metric attributes.
+struct RequestMetricData<'a> {
+    method: &'a http::Method,
+    server_address: Option<&'a str>,
+    server_port: Option<u16>,
+    url_scheme: Option<&'a str>,
+    version: http::Version,
+    http_route: Option<&'a str>,
+    body_size: Option<u64>,
+}
+
+impl<'a> RequestMetricData<'a> {
+    fn from_http<B: Body>(side: MetricSide, req: &'a Request<B>) -> Self {
+        let util::HttpRequestAttributes {
+            url_scheme,
+            server_address,
+            server_port,
+        } = match side {
+            MetricSide::Client => util::HttpRequestAttributes::from_sent_request(req),
+            MetricSide::Server => util::HttpRequestAttributes::from_recv_request(req),
+        };
+
+        Self {
+            method: req.method(),
+            server_address,
+            server_port,
+            url_scheme,
+            version: req.version(),
+            http_route: util::http_route(req),
+            body_size: util::http_request_size(req),
+        }
     }
 }
 
@@ -239,75 +257,38 @@ struct ResponseMetricState {
 }
 
 impl ResponseMetricState {
-    fn new<B: Body>(side: MetricSide, req: &Request<B>) -> Self {
+    fn new(data: RequestMetricData<'_>) -> Self {
         let start = Instant::now();
-
-        let request_body_size = util::http_request_size(req);
+        let request_body_size = data.body_size;
 
         let active_requests_attributes;
         let attributes = {
             let mut attributes = vec![];
 
-            let http_method = util::http_method(req.method());
-            attributes.push(KeyValue::new("http.request.method", http_method));
+            attributes.push(KeyValue::new(
+                "http.request.method",
+                util::http_method(data.method),
+            ));
 
-            if let Some(server_address) = req.uri().host() {
+            if let Some(server_address) = data.server_address {
                 attributes.push(KeyValue::new("server.address", server_address.to_string()));
             }
-
-            if let Some(server_port) = req.uri().port_u16() {
+            if let Some(server_port) = data.server_port {
                 attributes.push(KeyValue::new("server.port", server_port as i64));
             }
-
-            match side {
-                // For client side the protocol is the URL.
-                MetricSide::Client => {
-                    let util::HttpRequestAttributes {
-                        url_scheme,
-                        server_address,
-                        server_port,
-                    } = util::HttpRequestAttributes::from_sent_request(req);
-
-                    if let Some(server_address) = server_address {
-                        attributes
-                            .push(KeyValue::new("server.address", server_address.to_string()));
-                    }
-                    if let Some(server_port) = server_port {
-                        attributes.push(KeyValue::new("server.port", server_port.to_string()));
-                    }
-                    if let Some(url_scheme) = url_scheme {
-                        attributes.push(KeyValue::new("url.scheme", url_scheme.to_string()));
-                    }
-                }
-                MetricSide::Server => {
-                    let util::HttpRequestAttributes {
-                        url_scheme,
-                        server_address,
-                        server_port,
-                    } = util::HttpRequestAttributes::from_recv_request(req);
-
-                    if let Some(server_address) = server_address {
-                        attributes
-                            .push(KeyValue::new("server.address", server_address.to_string()));
-                    }
-                    if let Some(server_port) = server_port {
-                        attributes.push(KeyValue::new("server.port", server_port.to_string()));
-                    }
-                    if let Some(url_scheme) = url_scheme {
-                        attributes.push(KeyValue::new("url.scheme", url_scheme.to_string()));
-                    }
-                }
-            };
+            if let Some(url_scheme) = data.url_scheme {
+                attributes.push(KeyValue::new("url.scheme", url_scheme.to_string()));
+            }
 
             active_requests_attributes = attributes.len();
 
             attributes.push(KeyValue::new("network.protocol.name", "http"));
 
-            if let Some(http_version) = util::http_version(req.version()) {
-                attributes.push(KeyValue::new("network.protocol.version", http_version));
+            if let Some(version) = util::http_version(data.version) {
+                attributes.push(KeyValue::new("network.protocol.version", version));
             }
 
-            if let Some(http_route) = util::http_route(req) {
+            if let Some(http_route) = data.http_route {
                 attributes.push(KeyValue::new("http.route", http_route.to_string()));
             }
 
@@ -322,15 +303,15 @@ impl ResponseMetricState {
         }
     }
 
-    fn push_response_attributes<B, E>(&mut self, res: &Result<Response<B>, E>)
+    fn push_response_attributes<E>(&mut self, res: Result<http::StatusCode, &E>)
     where
         E: Display,
     {
         match res {
-            Ok(response) => {
+            Ok(status) => {
                 self.attributes.push(KeyValue::new(
                     "http.response.status_code",
-                    response.status().as_u16() as i64,
+                    status.as_u16() as i64,
                 ));
             }
             Err(err) => {
@@ -340,9 +321,26 @@ impl ResponseMetricState {
         }
     }
 
-    /// Returns the elapsed time since the request was created in seconds.
-    fn elapsed_seconds(&self) -> f64 {
-        self.start.elapsed().as_secs_f64()
+    fn record_metrics(&self, record: &MetricsRecord, response_body_size: Option<u64>) {
+        let duration = self.start.elapsed().as_secs_f64();
+
+        record.request_duration.record(duration, self.attributes());
+
+        record
+            .active_requests
+            .add(-1, self.active_requests_attributes());
+
+        if let Some(request_body_size) = self.request_body_size {
+            record
+                .request_body_size
+                .record(request_body_size, self.attributes());
+        }
+
+        if let Some(response_size) = response_body_size {
+            record
+                .response_body_size
+                .record(response_size, self.attributes());
+        }
     }
 
     /// Return the attributes for each metric.

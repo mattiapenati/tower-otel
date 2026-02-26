@@ -7,11 +7,45 @@ use std::{
 
 use pin_project::pin_project;
 use tower_service::Service;
-use tracing::{Level, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing::Span;
 
-use super::{record_error, span_kind, Http, SpanKind};
-use crate::{trace::injector::HeaderInjector, util};
+use super::{
+    make_request_span, record_error, record_response, AnyUrl, Http, RequestSpanData, SpanKind,
+};
+use crate::util;
+
+impl<'r, 'h> RequestSpanData<'r, 'h> {
+    /// Build from a `reqwest::Request` acting as a **client**.
+    ///
+    /// Since `reqwest::Request` has no `into_parts()`, `req.url()` (shared borrow) and
+    /// `req.headers_mut()` (exclusive borrow) cannot coexist. The URL is cloned once so
+    /// that the shared borrow ends before the exclusive borrow begins. All string accessors
+    /// then borrow from the owned `url::Url` — zero further allocations.
+    pub(super) fn from_reqwest_request(kind: SpanKind, req: &'r mut reqwest::Request) -> Self
+    where
+        'r: 'h,
+    {
+        let method = util::http_method(req.method());
+        let version = util::http_version(req.version());
+        // Clone the whole URL once; all string borrows (path, host, scheme, …) come from
+        // the owned value. The shared borrow of `req` ends here, before headers_mut().
+        let url = AnyUrl::Url(req.url().clone());
+        // All shared borrows of req released. Safe to take exclusive borrow:
+        let headers = req.headers_mut();
+        Self {
+            kind,
+            method,
+            version,
+            url,
+            headers,
+            server_address: None,
+            server_port: None,
+            url_scheme: None,
+            http_route: None,
+            client_address: None,
+        }
+    }
+}
 
 impl<S> Service<reqwest::Request> for Http<S>
 where
@@ -31,7 +65,10 @@ where
             matches!(self.kind, SpanKind::Client),
             "Http middleware with reqwest::Request only supports client-side spans"
         );
-        let span = make_span(self.level, self.kind, &mut req);
+        let span = {
+            let mut data = RequestSpanData::from_reqwest_request(self.kind, &mut req);
+            make_request_span(self.level, &mut data)
+        };
         let inner = {
             let _enter = span.enter();
             self.inner.call(req)
@@ -66,7 +103,7 @@ where
 
         match ready!(this.inner.poll(cx)) {
             Ok(response) => {
-                record_response(this.span, *this.kind, &response);
+                record_response(this.span, response.status(), response.headers());
                 Poll::Ready(Ok(response))
             }
             Err(err) => {
@@ -74,90 +111,5 @@ where
                 Poll::Ready(Err(err))
             }
         }
-    }
-}
-
-fn make_span(level: Level, kind: SpanKind, request: &mut reqwest::Request) -> Span {
-    macro_rules! make_span {
-        ($level:expr) => {{
-            use tracing::field::Empty;
-
-            tracing::span!(
-                $level,
-                "HTTP",
-                "error.message" = Empty,
-                "http.request.method" = util::http_method(request.method()),
-                "http.response.status_code" = Empty,
-                "network.protocol.name" = "http",
-                "network.protocol.version" = util::http_version(request.version()),
-                "otel.kind" = span_kind(kind),
-                "otel.status_code" = Empty,
-                "server.address" = Empty,
-                "server.port" = Empty,
-                "url.full" = Empty,
-                "url.path" = request.url().path(),
-                "url.query" = Empty,
-                "url.scheme" = Empty,
-            )
-        }};
-    }
-
-    let span = match level {
-        Level::ERROR => make_span!(Level::ERROR),
-        Level::WARN => make_span!(Level::WARN),
-        Level::INFO => make_span!(Level::INFO),
-        Level::DEBUG => make_span!(Level::DEBUG),
-        Level::TRACE => make_span!(Level::TRACE),
-    };
-
-    for (header_name, header_value) in request.headers().iter() {
-        if let Ok(attribute_value) = header_value.to_str() {
-            let attribute_name = format!("http.request.header.{}", header_name);
-            span.set_attribute(attribute_name, attribute_value.to_owned());
-        }
-    }
-
-    if let Some(query) = request.url().query() {
-        span.record("url.query", query);
-    }
-
-    span.record("url.full", request.url().as_str());
-
-    if let Some(server_address) = request.url().host_str() {
-        span.record("server.address", server_address);
-    }
-    if let Some(server_port) = request.url().port_or_known_default() {
-        span.record("server.port", server_port as i64);
-    }
-    span.record("url.scheme", request.url().scheme());
-
-    let context = span.context();
-    opentelemetry::global::get_text_map_propagator(|injector| {
-        injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
-    });
-
-    span
-}
-
-fn record_response(span: &Span, kind: SpanKind, response: &reqwest::Response) {
-    span.record(
-        "http.response.status_code",
-        response.status().as_u16() as i64,
-    );
-
-    for (header_name, header_value) in response.headers().iter() {
-        if let Ok(attribute_value) = header_value.to_str() {
-            let attribute_name = format!("http.response.header.{}", header_name);
-            span.set_attribute(attribute_name, attribute_value.to_owned());
-        }
-    }
-
-    if let SpanKind::Client = kind {
-        if response.status().is_client_error() {
-            span.record("otel.status_code", "ERROR");
-        }
-    }
-    if response.status().is_server_error() {
-        span.record("otel.status_code", "ERROR");
     }
 }
