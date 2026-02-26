@@ -240,7 +240,7 @@ where
 
         match ready!(this.inner.poll(cx)) {
             Ok(response) => {
-                record_response(this.span, response.status(), response.headers());
+                record_response(this.span, *this.kind, response.status(), response.headers());
                 Poll::Ready(Ok(response))
             }
             Err(err) => {
@@ -350,7 +350,7 @@ fn make_request_span(level: Level, data: &mut RequestSpanData<'_, '_>) -> Span {
 }
 
 /// Records fields associated to the response.
-fn record_response(span: &Span, status: StatusCode, headers: &HeaderMap) {
+fn record_response(span: &Span, kind: SpanKind, status: StatusCode, headers: &HeaderMap) {
     span.record("http.response.status_code", status.as_u16() as i64);
 
     for (header_name, header_value) in headers.iter() {
@@ -360,7 +360,12 @@ fn record_response(span: &Span, status: StatusCode, headers: &HeaderMap) {
         }
     }
 
-    if status.is_server_error() || status.is_client_error() {
+    if let SpanKind::Client = kind {
+        if status.is_client_error() {
+            span.record("otel.status_code", "ERROR");
+        }
+    }
+    if status.is_server_error() {
         span.record("otel.status_code", "ERROR");
     }
 }

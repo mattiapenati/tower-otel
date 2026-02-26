@@ -103,7 +103,7 @@ where
 
         match ready!(this.inner.poll(cx)) {
             Ok(response) => {
-                record_response(this.span, response.status(), response.headers());
+                record_response(this.span, *this.kind, response.status(), response.headers());
                 Poll::Ready(Ok(response))
             }
             Err(err) => {
