@@ -1,3 +1,11 @@
+## Unreleased
+
+- Add `reqwest_013` feature flag that enables `HttpLayer` and `MetricLayer`
+  support for [reqwest](https://docs.rs/reqwest) v0.13. When enabled, `Http<S>`
+  from both `trace` and `metrics` modules implements
+  `Service<reqwest::Request, Response = reqwest::Response>` for client-side
+  middleware. Trace context is propagated into outgoing request headers.
+
 ## v0.8.0
 
 - Update [`opentelemetry`]` to v0.31.0
