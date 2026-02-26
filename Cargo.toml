@@ -44,6 +44,7 @@ opentelemetry = { version = "0.31", default-features = false, features = [
   "metrics",
 ] }
 pin-project = "1"
+reqwest = { version = "0.13", optional = true, default-features = false }
 tower-layer = "0.3"
 tower-service = "0.3"
 tracing = { version = "0.1", default-features = false }
@@ -52,3 +53,4 @@ tracing-opentelemetry = { version = "0.32", default-features = false }
 [features]
 default = []
 axum = ["dep:axum"]
+reqwest_013 = ["dep:reqwest"]

@@ -1,5 +1,8 @@
 //! Middleware that adds tracing to a [`Service`] that handles HTTP requests.
 
+#[cfg(feature = "reqwest_013")]
+mod reqwest;
+
 use std::{
     fmt::Display,
     future::Future,
