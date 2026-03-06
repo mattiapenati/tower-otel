@@ -59,26 +59,26 @@ pub fn http_body_size_from_headers(headers: &http::HeaderMap) -> Option<u64> {
 /// For `http::Request` the URI is borrowed directly (zero allocation for URL fields).
 /// For `reqwest::Request` the URL is cloned once (one allocation total, then all string
 /// accessors borrow from the owned value).
-pub(crate) enum AnyUrl<'r> {
-    Uri(&'r http::Uri),
+pub(crate) enum Uri<'r> {
+    Http(&'r http::Uri),
     #[cfg(feature = "reqwest_013")]
-    Url(reqwest::Url),
+    Reqwest(reqwest::Url),
 }
 
-impl<'r> AnyUrl<'r> {
+impl<'r> Uri<'r> {
     pub(crate) fn path(&self) -> &str {
         match self {
-            AnyUrl::Uri(uri) => uri.path(),
+            Uri::Http(uri) => uri.path(),
             #[cfg(feature = "reqwest_013")]
-            AnyUrl::Url(url) => url.path(),
+            Uri::Reqwest(url) => url.path(),
         }
     }
 
     pub(crate) fn query(&self) -> Option<&str> {
         match self {
-            AnyUrl::Uri(uri) => uri.query(),
+            Uri::Http(uri) => uri.query(),
             #[cfg(feature = "reqwest_013")]
-            AnyUrl::Url(url) => url.query(),
+            Uri::Reqwest(url) => url.query(),
         }
     }
 
@@ -86,37 +86,37 @@ impl<'r> AnyUrl<'r> {
     /// it borrows from the owned value (zero allocation).
     pub(crate) fn full_str(&self) -> Cow<'_, str> {
         match self {
-            AnyUrl::Uri(uri) => Cow::Owned(uri.to_string()),
+            Uri::Http(uri) => Cow::Owned(uri.to_string()),
             #[cfg(feature = "reqwest_013")]
-            AnyUrl::Url(url) => Cow::Borrowed(url.as_str()),
+            Uri::Reqwest(url) => Cow::Borrowed(url.as_str()),
         }
     }
 
     pub(crate) fn host(&self) -> Option<&str> {
         match self {
-            AnyUrl::Uri(uri) => uri.host(),
+            Uri::Http(uri) => uri.host(),
             #[cfg(feature = "reqwest_013")]
-            AnyUrl::Url(url) => url.host_str(),
+            Uri::Reqwest(url) => url.host_str(),
         }
     }
 
     pub(crate) fn port_or_default(&self) -> Option<u16> {
         match self {
-            AnyUrl::Uri(uri) => uri.port_u16().or_else(|| match uri.scheme_str() {
+            Uri::Http(uri) => uri.port_u16().or_else(|| match uri.scheme_str() {
                 Some("http") => Some(80),
                 Some("https") => Some(443),
                 _ => None,
             }),
             #[cfg(feature = "reqwest_013")]
-            AnyUrl::Url(url) => url.port_or_known_default(),
+            Uri::Reqwest(url) => url.port_or_known_default(),
         }
     }
 
     pub(crate) fn scheme(&self) -> Option<&str> {
         match self {
-            AnyUrl::Uri(uri) => uri.scheme_str(),
+            Uri::Http(uri) => uri.scheme_str(),
             #[cfg(feature = "reqwest_013")]
-            AnyUrl::Url(url) => Some(url.scheme()),
+            Uri::Reqwest(url) => Some(url.scheme()),
         }
     }
 }

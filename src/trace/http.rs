@@ -10,138 +10,20 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-use http::{HeaderMap, Request, Response, StatusCode};
+use http::{HeaderMap, Response, StatusCode};
 use pin_project::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::{
-    trace::{extractor::HeaderExtractor, injector::HeaderInjector},
-    util::{self, AnyUrl},
-};
-
-/// Describes the relationship between the [`Span`] and the service producing the span.
-#[derive(Clone, Copy, Debug)]
-enum SpanKind {
-    /// The span describes a request sent to some remote service.
-    Client,
-    /// The span describes the server-side handling of a request.
-    Server,
-}
-
-impl SpanKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            SpanKind::Client => "client",
-            SpanKind::Server => "server",
-        }
-    }
-}
-
-/// Data extracted from an HTTP request used to build a tracing span.
-///
-/// `'r` is the lifetime of read-only data (URL, extensions).
-/// `'h` is the lifetime of the mutable headers borrow (for context injection/extraction).
-struct RequestSpanData<'r, 'h> {
-    kind: SpanKind,
-    /// Pre-computed via [`util::http_method`] — `'static`, no borrow of the request.
-    method: &'static str,
-    /// Pre-computed via [`util::http_version`] — `'static`, no borrow of the request.
-    version: Option<&'static str>,
-    /// Provides `path`, `query`, `host`, `port`, `scheme`, and `full_str` for the span.
-    url: AnyUrl<'r>,
-    /// For context injection (client) or extraction (server).
-    headers: &'h mut HeaderMap,
-    /// Server-only: `server.address` extracted from `Forwarded`/`Host` headers.
-    server_address: Option<String>,
-    /// Server-only: `server.port` extracted from `Forwarded`/`Host` headers.
-    server_port: Option<u16>,
-    /// Server-only: `url.scheme` extracted from `Forwarded`/`X-Forwarded-Proto` headers.
-    url_scheme: Option<String>,
-    /// Server-only. Borrowed from `parts.extensions` (disjoint from headers).
-    http_route: Option<&'r str>,
-    /// Server-only. Copied to avoid a lifetime on `SocketAddr`.
-    client_address: Option<std::net::SocketAddr>,
-}
-
-impl<'r, 'h> RequestSpanData<'r, 'h> {
-    /// Build from the parts of an `http::Request` acting as a **client**.
-    ///
-    /// Uses disjoint field access on [`http::request::Parts`]: `parts.uri` (shared) and
-    /// `parts.headers` (exclusive) can coexist because they are separate struct fields.
-    fn from_http_client_parts(parts: &'r mut http::request::Parts) -> Self
-    where
-        'r: 'h,
-    {
-        let method = util::http_method(&parts.method);
-        let version = util::http_version(parts.version);
-        // Borrow parts.uri specifically — disjoint from parts.headers.
-        let url = AnyUrl::Uri(&parts.uri);
-        // All borrows above are from parts.uri or 'static — disjoint from parts.headers.
-        let headers = &mut parts.headers;
-        Self {
-            kind: SpanKind::Client,
-            method,
-            version,
-            url,
-            headers,
-            server_address: None,
-            server_port: None,
-            url_scheme: None,
-            http_route: None,
-            client_address: None,
-        }
-    }
-
-    /// Build from the parts of an `http::Request` acting as a **server**.
-    ///
-    /// `server_address` and `url_scheme` are extracted from headers and immediately owned
-    /// so that `parts.headers` can then be mutably borrowed for context extraction.
-    fn from_http_server_parts(parts: &'r mut http::request::Parts) -> Self
-    where
-        'r: 'h,
-    {
-        let method = util::http_method(&parts.method);
-        let version = util::http_version(parts.version);
-        // server_address and url_scheme come from parts.headers (shared borrow).
-        // Convert to owned immediately so we can take &mut parts.headers next.
-        let (server_address, url_scheme, server_port) = {
-            let attrs = util::HttpRequestAttributes::from_recv_headers(&parts.headers);
-            (
-                attrs.server_address.map(ToOwned::to_owned),
-                attrs.url_scheme.map(ToOwned::to_owned),
-                attrs.server_port,
-            )
-            // attrs (and shared borrow of parts.headers) dropped here
-        };
-        // http_route and client_address come from parts.extensions — disjoint from headers.
-        let http_route = util::http_route_from_extensions(&parts.extensions);
-        let client_address = util::client_address_from_extensions(&parts.extensions).copied();
-        // parts.uri and parts.headers are separate fields — disjoint borrows OK.
-        let url = AnyUrl::Uri(&parts.uri);
-        let headers = &mut parts.headers;
-        Self {
-            kind: SpanKind::Server,
-            method,
-            version,
-            url,
-            headers,
-            server_address,
-            server_port,
-            url_scheme,
-            http_route,
-            client_address,
-        }
-    }
-}
+use crate::trace::{extractor::HeaderExtractor, injector::HeaderInjector};
 
 /// [`Layer`] that adds tracing to a [`Service`] that handles HTTP requests.
 #[derive(Clone, Debug)]
 pub struct HttpLayer {
     level: Level,
-    kind: SpanKind,
+    kind: sealed::SpanKind,
 }
 
 impl HttpLayer {
@@ -149,7 +31,7 @@ impl HttpLayer {
     pub fn server(level: Level) -> Self {
         Self {
             level,
-            kind: SpanKind::Server,
+            kind: sealed::SpanKind::Server,
         }
     }
 
@@ -157,7 +39,7 @@ impl HttpLayer {
     pub fn client(level: Level) -> Self {
         Self {
             level,
-            kind: SpanKind::Client,
+            kind: sealed::SpanKind::Client,
         }
     }
 }
@@ -179,13 +61,15 @@ impl<S> Layer<S> for HttpLayer {
 pub struct Http<S> {
     inner: S,
     level: Level,
-    kind: SpanKind,
+    kind: sealed::SpanKind,
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for Http<S>
+impl<S, Req, Res> Service<Req> for Http<S>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>>,
+    S: Service<Req, Response = Res>,
     S::Error: Display,
+    Req: HttpRequest,
+    Res: HttpResponse,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -195,16 +79,8 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let (mut parts, body) = req.into_parts();
-        let span = {
-            let mut data = match self.kind {
-                SpanKind::Client => RequestSpanData::from_http_client_parts(&mut parts),
-                SpanKind::Server => RequestSpanData::from_http_server_parts(&mut parts),
-            };
-            make_request_span(self.level, &mut data)
-        };
-        let req = Request::from_parts(parts, body);
+    fn call(&mut self, mut req: Req) -> Self::Future {
+        let span = make_request_span(self.level, self.kind, &mut req);
         let inner = {
             let _enter = span.enter();
             self.inner.call(req)
@@ -224,15 +100,16 @@ pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
     span: Span,
-    kind: SpanKind,
+    kind: sealed::SpanKind,
 }
 
-impl<F, ResBody, E> Future for ResponseFuture<F>
+impl<F, Res, E> Future for ResponseFuture<F>
 where
-    F: Future<Output = Result<Response<ResBody>, E>>,
+    F: Future<Output = Result<Res, E>>,
+    Res: HttpResponse,
     E: Display,
 {
-    type Output = Result<Response<ResBody>, E>;
+    type Output = Result<Res, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -251,8 +128,20 @@ where
     }
 }
 
+/// Abstraction over HTTP requests that can be used by the middleware.
+pub trait HttpRequest: sealed::HttpRequest {}
+
+impl<B> HttpRequest for http::Request<B> {}
+
+/// Abstraction over HTTP responses that can be used by the middleware.
+pub trait HttpResponse: sealed::HttpResponse {}
+
+impl<B> HttpResponse for Response<B> {}
+
 /// Creates a new [`Span`] for the given request.
-fn make_request_span(level: Level, data: &mut RequestSpanData<'_, '_>) -> Span {
+fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl HttpRequest) -> Span {
+    let data = request.extract_span_data(kind);
+
     macro_rules! make_span {
         ($level:expr) => {{
             use tracing::field::Empty;
@@ -267,7 +156,7 @@ fn make_request_span(level: Level, data: &mut RequestSpanData<'_, '_>) -> Span {
                 "http.response.status_code" = Empty,
                 "network.protocol.name" = "http",
                 "network.protocol.version" = data.version,
-                "otel.kind" = data.kind.as_str(),
+                "otel.kind" = kind.as_str(),
                 "otel.status_code" = Empty,
                 "server.address" = Empty,
                 "server.port" = Empty,
@@ -298,8 +187,8 @@ fn make_request_span(level: Level, data: &mut RequestSpanData<'_, '_>) -> Span {
         span.record("url.query", query);
     }
 
-    match data.kind {
-        SpanKind::Client => {
+    match kind {
+        sealed::SpanKind::Client => {
             span.record("url.full", data.url.full_str().as_ref());
             if let Some(host) = data.url.host() {
                 span.record("server.address", host);
@@ -310,13 +199,8 @@ fn make_request_span(level: Level, data: &mut RequestSpanData<'_, '_>) -> Span {
             if let Some(scheme) = data.url.scheme() {
                 span.record("url.scheme", scheme);
             }
-
-            let context = span.context();
-            opentelemetry::global::get_text_map_propagator(|injector| {
-                injector.inject_context(&context, &mut HeaderInjector(data.headers));
-            });
         }
-        SpanKind::Server => {
+        sealed::SpanKind::Server => {
             if let Some(http_route) = data.http_route {
                 span.record("http.route", http_route);
             }
@@ -336,7 +220,17 @@ fn make_request_span(level: Level, data: &mut RequestSpanData<'_, '_>) -> Span {
             if let Some(ref url_scheme) = data.url_scheme {
                 span.record("url.scheme", url_scheme.as_str());
             }
+        }
+    }
 
+    match kind {
+        sealed::SpanKind::Client => {
+            let context = span.context();
+            opentelemetry::global::get_text_map_propagator(|injector| {
+                injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
+            });
+        }
+        sealed::SpanKind::Server => {
             let context = opentelemetry::global::get_text_map_propagator(|extractor| {
                 extractor.extract(&HeaderExtractor(data.headers))
             });
@@ -350,7 +244,7 @@ fn make_request_span(level: Level, data: &mut RequestSpanData<'_, '_>) -> Span {
 }
 
 /// Records fields associated to the response.
-fn record_response(span: &Span, kind: SpanKind, status: StatusCode, headers: &HeaderMap) {
+fn record_response(span: &Span, kind: sealed::SpanKind, status: StatusCode, headers: &HeaderMap) {
     span.record("http.response.status_code", status.as_u16() as i64);
 
     for (header_name, header_value) in headers.iter() {
@@ -360,7 +254,7 @@ fn record_response(span: &Span, kind: SpanKind, status: StatusCode, headers: &He
         }
     }
 
-    if let SpanKind::Client = kind {
+    if let sealed::SpanKind::Client = kind {
         if status.is_client_error() {
             span.record("otel.status_code", "ERROR");
         }
@@ -374,4 +268,115 @@ fn record_response(span: &Span, kind: SpanKind, status: StatusCode, headers: &He
 fn record_error<E: Display>(span: &Span, err: &E) {
     span.record("otel.status_code", "ERROR");
     span.record("error.message", err.to_string());
+}
+
+pub(crate) mod sealed {
+    use http::{HeaderMap, Response, StatusCode};
+
+    use crate::util;
+
+    /// Describes the relationship between the [`Span`] and the service producing the span.
+    #[derive(Clone, Copy, Debug)]
+    pub enum SpanKind {
+        /// The span describes a request sent to some remote service.
+        Client,
+        /// The span describes the server-side handling of a request.
+        Server,
+    }
+
+    impl SpanKind {
+        pub fn as_str(self) -> &'static str {
+            match self {
+                SpanKind::Client => "client",
+                SpanKind::Server => "server",
+            }
+        }
+    }
+
+    /// Data extracted from an HTTP request used to build a tracing span.
+    pub struct RequestSpanData<'r> {
+        pub(crate) method: &'static str,
+        pub(crate) version: Option<&'static str>,
+        pub(crate) url: util::Uri<'r>,
+        pub(crate) headers: &'r HeaderMap,
+        pub(crate) server_address: Option<String>,
+        pub(crate) server_port: Option<u16>,
+        pub(crate) url_scheme: Option<String>,
+        pub(crate) http_route: Option<&'r str>,
+        pub(crate) client_address: Option<std::net::SocketAddr>,
+    }
+
+    pub trait HttpRequest {
+        /// Extract the request data used to create span
+        fn extract_span_data<'r>(&'r mut self, kind: SpanKind) -> RequestSpanData<'r>;
+
+        /// Gets a mutable reference to the request headers, used for context injection.
+        fn headers_mut(&mut self) -> &mut HeaderMap;
+    }
+
+    impl<B> HttpRequest for http::Request<B> {
+        #[inline(always)]
+        fn extract_span_data<'r>(&'r mut self, kind: SpanKind) -> RequestSpanData<'r> {
+            match kind {
+                SpanKind::Client => RequestSpanData {
+                    method: util::http_method(self.method()),
+                    version: util::http_version(self.version()),
+                    url: util::Uri::Http(self.uri()),
+                    headers: self.headers(),
+                    server_address: None,
+                    server_port: None,
+                    url_scheme: None,
+                    http_route: None,
+                    client_address: None,
+                },
+                SpanKind::Server => {
+                    let (server_address, url_scheme, server_port) = {
+                        let attrs = util::HttpRequestAttributes::from_recv_headers(self.headers());
+                        (
+                            attrs.server_address.map(ToOwned::to_owned),
+                            attrs.url_scheme.map(ToOwned::to_owned),
+                            attrs.server_port,
+                        )
+                    };
+                    RequestSpanData {
+                        method: util::http_method(self.method()),
+                        version: util::http_version(self.version()),
+                        url: util::Uri::Http(self.uri()),
+                        headers: self.headers(),
+                        server_address,
+                        server_port,
+                        url_scheme,
+                        http_route: util::http_route_from_extensions(self.extensions()),
+                        client_address: util::client_address_from_extensions(self.extensions())
+                            .copied(),
+                    }
+                }
+            }
+        }
+
+        #[inline(always)]
+        fn headers_mut(&mut self) -> &mut HeaderMap {
+            http::Request::headers_mut(self)
+        }
+    }
+
+    pub trait HttpResponse {
+        /// Returns the HTTP status code of the response.
+        fn status(&self) -> StatusCode;
+
+        /// Returns the HTTP headers of the response.
+        fn headers(&self) -> &HeaderMap;
+    }
+
+    impl<B> HttpResponse for Response<B> {
+        #[inline(always)]
+        fn status(&self) -> StatusCode {
+            Response::status(self)
+        }
+
+        #[inline(always)]
+        fn headers(&self) -> &HeaderMap {
+            Response::headers(self)
+        }
+    }
 }
