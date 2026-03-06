@@ -12,8 +12,6 @@ use std::{
     time::Instant,
 };
 
-use http::{Request, Response};
-use http_body::Body;
 use opentelemetry::{
     metrics::{Histogram, Meter, UpDownCounter},
     KeyValue,
@@ -24,18 +22,9 @@ use tower_service::Service;
 
 use crate::util;
 
-/// The side from which metrics are recorded.
-#[derive(Clone, Copy, Debug)]
-enum MetricSide {
-    /// The span describes a request sent to some remote service.
-    Client,
-    /// The span describes the server-side handling of a request.
-    Server,
-}
-
 #[derive(Debug)]
 struct MetricsRecord {
-    side: MetricSide,
+    side: sealed::MetricSide,
     request_duration: Histogram<f64>,
     active_requests: UpDownCounter<i64>,
     request_body_size: Histogram<u64>,
@@ -45,7 +34,7 @@ struct MetricsRecord {
 impl MetricsRecord {
     fn server(meter: &Meter) -> Self {
         Self {
-            side: MetricSide::Server,
+            side: sealed::MetricSide::Server,
             request_duration: meter
                 .f64_histogram("http.server.request.duration")
                 .with_description("Duration of HTTP server requests")
@@ -74,7 +63,7 @@ impl MetricsRecord {
 
     fn client(meter: &Meter) -> Self {
         Self {
-            side: MetricSide::Client,
+            side: sealed::MetricSide::Client,
             request_duration: meter
                 .f64_histogram("http.client.request.duration")
                 .with_description("Duration of HTTP client requests")
@@ -98,6 +87,120 @@ impl MetricsRecord {
                 .with_description("Number of active HTTP client requests")
                 .with_unit("{request}")
                 .build(),
+        }
+    }
+
+    fn record_request(&self, req: &impl HttpRequest) -> MetricState {
+        let data = req.extract_metric_data(self.side);
+
+        let start = Instant::now();
+        let request_body_size = data.body_size;
+
+        let active_requests_attributes;
+        let attributes = {
+            let mut attributes = vec![];
+
+            attributes.push(KeyValue::new(
+                "http.request.method",
+                util::http_method(data.method),
+            ));
+
+            if let Some(server_address) = data.server_address {
+                attributes.push(KeyValue::new("server.address", server_address.to_string()));
+            }
+            if let Some(server_port) = data.server_port {
+                attributes.push(KeyValue::new("server.port", server_port as i64));
+            }
+            if let Some(url_scheme) = data.url_scheme {
+                attributes.push(KeyValue::new("url.scheme", url_scheme.to_string()));
+            }
+
+            active_requests_attributes = attributes.len();
+
+            attributes.push(KeyValue::new("network.protocol.name", "http"));
+
+            if let Some(version) = util::http_version(data.version) {
+                attributes.push(KeyValue::new("network.protocol.version", version));
+            }
+
+            if let Some(http_route) = data.http_route {
+                attributes.push(KeyValue::new("http.route", http_route.to_string()));
+            }
+
+            attributes
+        };
+
+        let state = MetricState {
+            start,
+            request_body_size,
+            attributes,
+            active_requests_attributes,
+        };
+
+        self.active_requests
+            .add(1, state.active_requests_attributes());
+
+        state
+    }
+}
+
+struct MetricState {
+    start: Instant,
+    /// The size of the request body.
+    request_body_size: Option<u64>,
+    /// Attributes to add to the metrics.
+    attributes: Vec<KeyValue>,
+    /// The number of attributes that are used for only for active requests counter.
+    active_requests_attributes: usize,
+}
+
+impl MetricState {
+    /// Return the attributes for each metric.
+    fn attributes(&self) -> &[KeyValue] {
+        &self.attributes[..]
+    }
+
+    /// Returns the attributes used for active requests counter.
+    fn active_requests_attributes(&self) -> &[KeyValue] {
+        &self.attributes[..self.active_requests_attributes]
+    }
+}
+
+impl MetricsRecord {
+    fn record_response<Res, E>(&self, state: &mut MetricState, res: &Result<Res, E>)
+    where
+        Res: HttpResponse,
+        E: Display,
+    {
+        match res {
+            Ok(res) => {
+                state.attributes.push(KeyValue::new(
+                    "http.response.status_code",
+                    res.status().as_u16() as i64,
+                ));
+            }
+            Err(err) => {
+                state
+                    .attributes
+                    .push(KeyValue::new("error.type", err.to_string()));
+            }
+        }
+
+        let duration = state.start.elapsed().as_secs_f64();
+
+        self.request_duration.record(duration, state.attributes());
+
+        self.active_requests
+            .add(-1, state.active_requests_attributes());
+
+        if let Some(request_body_size) = state.request_body_size {
+            self.request_body_size
+                .record(request_body_size, state.attributes());
+        }
+
+        if let Some(response_size) = res.as_ref().ok().and_then(|res| res.body_size()) {
+            self.response_body_size
+                .record(response_size, state.attributes());
         }
     }
 }
@@ -144,12 +247,12 @@ pub struct Http<S> {
     record: Arc<MetricsRecord>,
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for Http<S>
+impl<S, Req, Res> Service<Req> for Http<S>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>>,
+    S: Service<Req, Response = Res>,
     S::Error: Display,
-    ReqBody: Body,
-    ResBody: Body,
+    Req: HttpRequest,
+    Res: HttpResponse,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -159,15 +262,10 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let data = RequestMetricData::from_http(self.record.side, &req);
-        let state = ResponseMetricState::new(data);
+    fn call(&mut self, req: Req) -> Self::Future {
         let record = Arc::clone(&self.record);
+        let state = record.record_request(&req);
         let inner = self.inner.call(req);
-
-        record
-            .active_requests
-            .add(1, state.active_requests_attributes());
 
         ResponseFuture {
             inner,
@@ -183,173 +281,109 @@ pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
     record: Arc<MetricsRecord>,
-    state: ResponseMetricState,
+    state: MetricState,
 }
 
-impl<F, ResBody, E> Future for ResponseFuture<F>
+impl<F, Res, E> Future for ResponseFuture<F>
 where
-    F: Future<Output = Result<Response<ResBody>, E>>,
-    ResBody: Body,
+    F: Future<Output = Result<Res, E>>,
+    Res: HttpResponse,
     E: Display,
 {
-    type Output = Result<Response<ResBody>, E>;
+    type Output = Result<Res, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
         let inner_response = ready!(this.inner.poll(cx));
-
-        this.state
-            .push_response_attributes(inner_response.as_ref().map(|r| r.status()));
-
-        let response_body_size = inner_response
-            .as_ref()
-            .ok()
-            .and_then(util::http_response_size);
-        this.state.record_metrics(this.record, response_body_size);
+        this.record.record_response(this.state, &inner_response);
 
         Poll::Ready(inner_response)
     }
 }
 
-/// Data extracted from an HTTP request used to build metric attributes.
-struct RequestMetricData<'a> {
-    method: &'a http::Method,
-    server_address: Option<&'a str>,
-    server_port: Option<u16>,
-    url_scheme: Option<&'a str>,
-    version: http::Version,
-    http_route: Option<&'a str>,
-    body_size: Option<u64>,
-}
+/// Abstraction over HTTP requests that can be used by the middleware.
+pub trait HttpRequest: sealed::HttpRequest {}
 
-impl<'a> RequestMetricData<'a> {
-    fn from_http<B: Body>(side: MetricSide, req: &'a Request<B>) -> Self {
-        let util::HttpRequestAttributes {
-            url_scheme,
-            server_address,
-            server_port,
-        } = match side {
-            MetricSide::Client => util::HttpRequestAttributes::from_sent_request(req),
-            MetricSide::Server => util::HttpRequestAttributes::from_recv_request(req),
-        };
+impl<B: http_body::Body> HttpRequest for http::Request<B> {}
 
-        Self {
-            method: req.method(),
-            server_address,
-            server_port,
-            url_scheme,
-            version: req.version(),
-            http_route: util::http_route(req),
-            body_size: util::http_request_size(req),
-        }
-    }
-}
+/// Abstraction over HTTP responses that can be used by the middleware.
+pub trait HttpResponse: sealed::HttpResponse {}
 
-struct ResponseMetricState {
-    start: Instant,
-    /// The size of the request body.
-    request_body_size: Option<u64>,
-    /// Attributes to add to the metrics.
-    attributes: Vec<KeyValue>,
-    /// The number of attributes that are used for only for active requests counter.
-    active_requests_attributes: usize,
-}
+impl<B: http_body::Body> HttpResponse for http::Response<B> {}
 
-impl ResponseMetricState {
-    fn new(data: RequestMetricData<'_>) -> Self {
-        let start = Instant::now();
-        let request_body_size = data.body_size;
+pub(crate) mod sealed {
+    use crate::util;
 
-        let active_requests_attributes;
-        let attributes = {
-            let mut attributes = vec![];
-
-            attributes.push(KeyValue::new(
-                "http.request.method",
-                util::http_method(data.method),
-            ));
-
-            if let Some(server_address) = data.server_address {
-                attributes.push(KeyValue::new("server.address", server_address.to_string()));
-            }
-            if let Some(server_port) = data.server_port {
-                attributes.push(KeyValue::new("server.port", server_port as i64));
-            }
-            if let Some(url_scheme) = data.url_scheme {
-                attributes.push(KeyValue::new("url.scheme", url_scheme.to_string()));
-            }
-
-            active_requests_attributes = attributes.len();
-
-            attributes.push(KeyValue::new("network.protocol.name", "http"));
-
-            if let Some(version) = util::http_version(data.version) {
-                attributes.push(KeyValue::new("network.protocol.version", version));
-            }
-
-            if let Some(http_route) = data.http_route {
-                attributes.push(KeyValue::new("http.route", http_route.to_string()));
-            }
-
-            attributes
-        };
-
-        Self {
-            start,
-            request_body_size,
-            attributes,
-            active_requests_attributes,
-        }
+    /// The side from which metrics are recorded.
+    #[derive(Clone, Copy, Debug)]
+    pub enum MetricSide {
+        /// The span describes a request sent to some remote service.
+        Client,
+        /// The span describes the server-side handling of a request.
+        Server,
     }
 
-    fn push_response_attributes<E>(&mut self, res: Result<http::StatusCode, &E>)
+    /// Data extracted from an HTTP request used to build metric attributes.
+    pub struct RequestMetricData<'a> {
+        pub method: &'a http::Method,
+        pub server_address: Option<&'a str>,
+        pub server_port: Option<u16>,
+        pub url_scheme: Option<&'a str>,
+        pub version: http::Version,
+        pub http_route: Option<&'a str>,
+        pub body_size: Option<u64>,
+    }
+
+    pub trait HttpRequest {
+        /// Extract the request data used to record metrics.
+        fn extract_metric_data<'r>(&'r self, side: MetricSide) -> RequestMetricData<'r>;
+    }
+
+    impl<B> HttpRequest for http::Request<B>
     where
-        E: Display,
+        B: http_body::Body,
     {
-        match res {
-            Ok(status) => {
-                self.attributes.push(KeyValue::new(
-                    "http.response.status_code",
-                    status.as_u16() as i64,
-                ));
+        #[inline(always)]
+        fn extract_metric_data<'r>(&'r self, side: MetricSide) -> RequestMetricData<'r> {
+            let util::HttpRequestAttributes {
+                url_scheme,
+                server_address,
+                server_port,
+            } = match side {
+                MetricSide::Client => util::HttpRequestAttributes::from_sent_request(self),
+                MetricSide::Server => util::HttpRequestAttributes::from_recv_request(self),
+            };
+
+            RequestMetricData {
+                method: self.method(),
+                server_address,
+                server_port,
+                url_scheme,
+                version: self.version(),
+                http_route: util::http_route(self),
+                body_size: util::http_request_size(self),
             }
-            Err(err) => {
-                self.attributes
-                    .push(KeyValue::new("error.type", err.to_string()));
-            }
         }
     }
 
-    fn record_metrics(&self, record: &MetricsRecord, response_body_size: Option<u64>) {
-        let duration = self.start.elapsed().as_secs_f64();
-
-        record.request_duration.record(duration, self.attributes());
-
-        record
-            .active_requests
-            .add(-1, self.active_requests_attributes());
-
-        if let Some(request_body_size) = self.request_body_size {
-            record
-                .request_body_size
-                .record(request_body_size, self.attributes());
-        }
-
-        if let Some(response_size) = response_body_size {
-            record
-                .response_body_size
-                .record(response_size, self.attributes());
-        }
+    pub trait HttpResponse {
+        fn status(&self) -> http::StatusCode;
+        fn body_size(&self) -> Option<u64>;
     }
 
-    /// Return the attributes for each metric.
-    fn attributes(&self) -> &[KeyValue] {
-        &self.attributes[..]
-    }
+    impl<B> HttpResponse for http::Response<B>
+    where
+        B: http_body::Body,
+    {
+        #[inline(always)]
+        fn status(&self) -> http::StatusCode {
+            http::Response::status(self)
+        }
 
-    /// Returns the attributes used for active requests counter.
-    fn active_requests_attributes(&self) -> &[KeyValue] {
-        &self.attributes[..self.active_requests_attributes]
+        #[inline(always)]
+        fn body_size(&self) -> Option<u64> {
+            util::http_response_size(self)
+        }
     }
 }
