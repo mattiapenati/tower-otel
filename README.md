@@ -10,7 +10,7 @@ defined for [HTTP spans] and [RPC].
 
 ## License
 
-Licensed under either of [Apache License 2.0](LICENSE-APACHE) or 
+Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted

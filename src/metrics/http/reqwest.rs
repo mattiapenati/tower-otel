@@ -7,7 +7,7 @@ impl super::sealed::HttpRequest for reqwest::Request {
         &'r self,
         side: super::sealed::MetricSide,
     ) -> super::sealed::RequestMetricData<'r> {
-        debug_assert!(
+        assert!(
             matches!(side, super::sealed::MetricSide::Client),
             "Http metrics middleware with reqwest::Request only supports client-side metrics"
         );

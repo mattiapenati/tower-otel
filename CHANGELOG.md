@@ -1,10 +1,10 @@
 ## Unreleased
 
 - Add `reqwest_013` feature flag that enables `HttpLayer` and `MetricLayer`
-  support for [reqwest](https://docs.rs/reqwest) v0.13. When enabled, `Http<S>`
-  from both `trace` and `metrics` modules implements
-  `Service<reqwest::Request, Response = reqwest::Response>` for client-side
-  middleware. Trace context is propagated into outgoing request headers.
+  support for [`reqwest`] v0.13. When enabled, `Http<S>` from both `trace` and
+  `metrics` modules implements `Service<reqwest::Request, Response =
+  reqwest::Response>` for client-side middleware. Trace context is propagated
+  into outgoing request headers.
 
 ## v0.8.0
 
@@ -43,6 +43,7 @@
 
 [`opentelemetry`]: https://crates.io/crates/opentelemetry
 [`prost`]: https://crates.io/crates/prost
+[`reqwest`]: https://crates.io/crates/reqwest
 [`slab`]: https://crates.io/crates/slab
 [`tonic`]: https://crates.io/crates/tonic
 [`tracing-opentelemetry`]: https://crates.io/crates/tracing-opentelemetry

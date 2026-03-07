@@ -8,7 +8,7 @@ impl super::sealed::HttpRequest for reqwest::Request {
         &'r mut self,
         kind: super::sealed::SpanKind,
     ) -> super::sealed::RequestSpanData<'r> {
-        debug_assert!(
+        assert!(
             matches!(kind, super::sealed::SpanKind::Client),
             "Http middleware with reqwest::Request only supports client-side spans"
         );
