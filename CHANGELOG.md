@@ -1,3 +1,7 @@
+## Unreleased
+
+- Fix features `Cargo.toml`
+
 ## 0.9.0
 
 - Add `reqwest_013` feature flag that enables `HttpLayer` and `MetricLayer`
