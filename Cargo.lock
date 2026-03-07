@@ -173,6 +173,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "pin-project",
+ "reqwest 0.13.2",
  "tokio",
  "tower",
  "tower-otel",

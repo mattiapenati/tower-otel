@@ -99,6 +99,18 @@ async fn main() {
     let body = std::str::from_utf8(&body).unwrap();
     tracing::info!("received '{}'", body);
 
+    let mut client = ServiceBuilder::new()
+        .layer(trace::HttpLayer::client(Level::DEBUG))
+        .layer(metrics::HttpLayer::client(&meter))
+        .service(reqwest::Client::new());
+    let req = reqwest::Request::new(
+        reqwest::Method::GET,
+        "http://[::1]:3000".try_into().unwrap(),
+    );
+    let res = client.ready().await.unwrap().call(req).await.unwrap();
+    let body = res.text().await.unwrap();
+    tracing::info!("received '{}'", body);
+
     meter_provider.shutdown().unwrap();
     tracer_provider.shutdown().unwrap();
 }
