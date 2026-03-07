@@ -1,4 +1,4 @@
-## Unreleased
+## 0.9.0
 
 - Add `reqwest_013` feature flag that enables `HttpLayer` and `MetricLayer`
   support for [`reqwest`] v0.13. When enabled, `Http<S>` from both `trace` and
