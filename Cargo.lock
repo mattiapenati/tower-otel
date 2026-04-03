@@ -144,6 +144,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-attributes"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "reqwest 0.13.2",
+ "tokio",
+ "tower",
+ "tower-otel",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "example-grpc"
 version = "0.1.0"
 dependencies = [
