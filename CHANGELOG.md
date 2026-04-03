@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Fix features `Cargo.toml`
+- Make the context propagation optional, enabled by default.
 
 ## 0.9.0
 

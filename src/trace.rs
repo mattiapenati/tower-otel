@@ -13,7 +13,8 @@ pub use self::{
     http::{Http, HttpLayer},
 };
 
-mod extractor;
 pub mod grpc;
 pub mod http;
-mod injector;
+
+#[cfg(feature = "propagate")]
+mod propagate;

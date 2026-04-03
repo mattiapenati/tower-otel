@@ -17,8 +17,6 @@ use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::trace::{extractor::HeaderExtractor, injector::HeaderInjector};
-
 /// [`Layer`] that adds tracing to a [`Service`] that handles HTTP requests.
 #[derive(Clone, Debug)]
 pub struct HttpLayer {
@@ -223,14 +221,19 @@ fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl Ht
         }
     }
 
+    #[cfg(feature = "propagate")]
     match kind {
         sealed::SpanKind::Client => {
+            use crate::trace::propagate::HeaderInjector;
+
             let context = span.context();
             opentelemetry::global::get_text_map_propagator(|injector| {
                 injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
             });
         }
         sealed::SpanKind::Server => {
+            use crate::trace::propagate::HeaderExtractor;
+
             let context = opentelemetry::global::get_text_map_propagator(|extractor| {
                 extractor.extract(&HeaderExtractor(data.headers))
             });

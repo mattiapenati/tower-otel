@@ -54,6 +54,7 @@ tracing = { version = "0.1", default-features = false }
 tracing-opentelemetry = { version = "0.32", default-features = false }
 
 [features]
-default = []
+default = ["propagate"]
+propagate = []
 axum = ["dep:axum"]
 reqwest_013 = ["dep:reqwest"]
