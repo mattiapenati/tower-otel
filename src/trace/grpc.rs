@@ -14,10 +14,7 @@ use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::{
-    trace::{extractor::HeaderExtractor, injector::HeaderInjector},
-    util,
-};
+use crate::util;
 
 /// Describes the relationship between the [`Span`] and the service producing the span.
 #[derive(Clone, Copy, Debug)]
@@ -200,10 +197,15 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 span.record("server.port", server_port);
             }
 
-            let context = span.context();
-            opentelemetry::global::get_text_map_propagator(|injector| {
-                injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
-            });
+            #[cfg(feature = "propagate")]
+            {
+                use crate::trace::propagate::HeaderInjector;
+
+                let context = span.context();
+                opentelemetry::global::get_text_map_propagator(|injector| {
+                    injector.inject_context(&context, &mut HeaderInjector(request.headers_mut()));
+                });
+            }
         }
         SpanKind::Server => {
             if let Some(client_address) = util::client_address(request) {
@@ -225,11 +227,16 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 span.record("server.port", server_port);
             }
 
-            let context = opentelemetry::global::get_text_map_propagator(|extractor| {
-                extractor.extract(&HeaderExtractor(request.headers_mut()))
-            });
-            if let Err(err) = span.set_parent(context) {
-                tracing::warn!("Failed to set parent span: {err}");
+            #[cfg(feature = "propagate")]
+            {
+                use crate::trace::propagate::HeaderExtractor;
+
+                let context = opentelemetry::global::get_text_map_propagator(|extractor| {
+                    extractor.extract(&HeaderExtractor(request.headers_mut()))
+                });
+                if let Err(err) = span.set_parent(context) {
+                    tracing::warn!("Failed to set parent span: {err}");
+                }
             }
         }
     }
