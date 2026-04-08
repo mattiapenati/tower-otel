@@ -12,13 +12,12 @@ use std::{
     time::Instant,
 };
 
-use opentelemetry::{
-    metrics::{Histogram, Meter, UpDownCounter},
-    KeyValue,
-};
+use opentelemetry::metrics::{Histogram, Meter, UpDownCounter};
 use pin_project::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
+
+pub use opentelemetry::KeyValue;
 
 use crate::util;
 
@@ -90,7 +89,7 @@ impl MetricsRecord {
         }
     }
 
-    fn record_request(&self, req: &impl HttpRequest) -> MetricState {
+    fn record_request(&self, req: &impl HttpRequest, attributes: Vec<KeyValue>) -> MetricState {
         let data = req.extract_metric_data(self.side);
 
         let start = Instant::now();
@@ -98,7 +97,7 @@ impl MetricsRecord {
 
         let active_requests_attributes;
         let attributes = {
-            let mut attributes = vec![];
+            let mut attributes = attributes;
 
             attributes.push(KeyValue::new(
                 "http.request.method",
@@ -206,9 +205,19 @@ impl MetricsRecord {
 }
 
 /// [`Layer`] that adds tracing to a [`Service`] that handles HTTP requests.
-#[derive(Clone, Debug)]
-pub struct HttpLayer {
+#[derive(Debug)]
+pub struct HttpLayer<A = DefaultAttributes> {
     record: Arc<MetricsRecord>,
+    attributes: Arc<A>,
+}
+
+impl<A> Clone for HttpLayer<A> {
+    fn clone(&self) -> Self {
+        Self {
+            record: Arc::clone(&self.record),
+            attributes: Arc::clone(&self.attributes),
+        }
+    }
 }
 
 impl HttpLayer {
@@ -217,6 +226,7 @@ impl HttpLayer {
         let record = MetricsRecord::server(meter);
         Self {
             record: Arc::new(record),
+            attributes: Arc::new(DefaultAttributes),
         }
     }
 
@@ -225,32 +235,59 @@ impl HttpLayer {
         let record = MetricsRecord::client(meter);
         Self {
             record: Arc::new(record),
+            attributes: Arc::new(DefaultAttributes),
         }
     }
 }
 
-impl<S> Layer<S> for HttpLayer {
-    type Service = Http<S>;
+impl<T> HttpLayer<T> {
+    pub fn with_custom_attributes<A>(self, attributes: A) -> HttpLayer<A> {
+        let HttpLayer { record, .. } = self;
+        HttpLayer {
+            record,
+            attributes: Arc::new(attributes),
+        }
+    }
+}
+
+impl<S, A> Layer<S> for HttpLayer<A> {
+    type Service = Http<S, A>;
 
     fn layer(&self, inner: S) -> Self::Service {
         Http {
             inner,
             record: Arc::clone(&self.record),
+            attributes: Arc::clone(&self.attributes),
         }
     }
 }
 
 /// Middleware that adds tracing to a [`Service`] that handles HTTP requests.
-#[derive(Clone, Debug)]
-pub struct Http<S> {
+#[derive(Debug)]
+pub struct Http<S, A = DefaultAttributes> {
     inner: S,
     record: Arc<MetricsRecord>,
+    attributes: Arc<A>,
 }
 
-impl<S, Req, Res> Service<Req> for Http<S>
+impl<S, A> Clone for Http<S, A>
+where
+    S: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            record: Arc::clone(&self.record),
+            attributes: Arc::clone(&self.attributes),
+        }
+    }
+}
+
+impl<S, A, Req, Res> Service<Req> for Http<S, A>
 where
     S: Service<Req, Response = Res>,
     S::Error: Display,
+    A: Attributes<Req>,
     Req: HttpRequest,
     Res: HttpResponse,
 {
@@ -262,9 +299,10 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Req) -> Self::Future {
+    fn call(&mut self, mut req: Req) -> Self::Future {
         let record = Arc::clone(&self.record);
-        let state = record.record_request(&req);
+        let attributes = self.attributes.request_attributes(&mut req);
+        let state = record.record_request(&req, attributes);
         let inner = self.inner.call(req);
 
         ResponseFuture {
@@ -385,5 +423,20 @@ pub(crate) mod sealed {
         fn body_size(&self) -> Option<u64> {
             util::http_response_size(self)
         }
+    }
+}
+
+/// Trait used to create attributes vector from new request.
+pub trait Attributes<Req> {
+    /// Generate a vector with custom attributes for the given request.
+    fn request_attributes(&self, request: &mut Req) -> Vec<KeyValue>;
+}
+
+/// Default implementation of [`Attributes`] trait for HTTP services.
+pub struct DefaultAttributes;
+
+impl<Req> Attributes<Req> for DefaultAttributes {
+    fn request_attributes(&self, _request: &mut Req) -> Vec<KeyValue> {
+        vec![]
     }
 }
