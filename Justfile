@@ -10,7 +10,6 @@ collector-run:
       --publish 127.0.0.1:55679:55679 \
       otel/opentelemetry-collector-contrib
 
-
 # kill collector
 collector-kill:
   docker kill opentelemetry-collector
@@ -22,3 +21,7 @@ example-http:
 # run gRPC example
 example-grpc:
   cargo run -p example-grpc --bin example-grpc
+
+# run custom-attributes example
+example-custom-attributes:
+  cargo run -p example-custom-attributes --bin example-custom-attributes
