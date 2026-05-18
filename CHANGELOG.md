@@ -1,4 +1,4 @@
-## Unreleased
+## 0.10.0
 
 - Update [`opentelemetry`]` to v0.32.0
 - Update [`tracing-opentelemetry`]` to v0.33.0
