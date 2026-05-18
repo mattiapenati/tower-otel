@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Update [`opentelemetry`]` to v0.32.0
+- Update [`tracing-opentelemetry`]` to v0.33.0
 - Fix features `Cargo.toml`
 
 ## 0.9.0

@@ -10,16 +10,18 @@ edition = "2021"
 license = "Apache-2.0 OR MIT"
 
 [workspace.dependencies]
-opentelemetry = { version = "0.31", features = ["metrics"] }
-opentelemetry-otlp = { version = "0.31", features = [
+axum = { version = "0.8", default-features = false }
+opentelemetry = { version = "0.32", default-features = false }
+opentelemetry-otlp = { version = "0.32", features = [
   "grpc-tonic",
   "metrics",
   "trace",
 ] }
-opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio"] }
+opentelemetry_sdk = { version = "0.32", features = ["metrics", "rt-tokio"] }
+reqwest = { version = "0.13", default-features = false }
 tower-otel = { path = "." }
-tracing = "0.1"
-tracing-opentelemetry = "0.32"
+tracing = { version = "0.1", default-features = false }
+tracing-opentelemetry = { version = "0.33", default-features = false }
 tracing-subscriber = "0.3"
 
 [package]
@@ -36,22 +38,22 @@ license.workspace = true
 autoexamples = false
 
 [dependencies]
-axum = { version = "0.8", optional = true, default-features = false, features = [
+axum = { workspace = true, optional = true, default-features = false, features = [
   "matched-path",
   "tokio",
 ] }
 cfg-if = "1"
 http = "1"
 http-body = "1"
-opentelemetry = { version = "0.31", default-features = false, features = [
+opentelemetry = { workspace = true, default-features = false, features = [
   "metrics",
 ] }
 pin-project = "1"
-reqwest = { version = "0.13", optional = true, default-features = false }
+reqwest = { workspace = true, optional = true, default-features = false }
 tower-layer = "0.3"
 tower-service = "0.3"
-tracing = { version = "0.1", default-features = false }
-tracing-opentelemetry = { version = "0.32", default-features = false }
+tracing = { workspace = true, default-features = false }
+tracing-opentelemetry = { workspace = true, default-features = false }
 
 [features]
 default = []
