@@ -177,7 +177,12 @@ fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl Ht
     };
 
     for (header_name, header_value) in data.headers.iter() {
-        if let Ok(attribute_value) = header_value.to_str() {
+        let attribute_value = if header_value.is_sensitive() {
+            Some("Sensitive")
+        } else {
+            header_value.to_str().ok()
+        };
+        if let Some(attribute_value) = attribute_value {
             let attribute_name = format!("http.request.header.{}", header_name);
             span.set_attribute(attribute_name, attribute_value.to_owned());
         }
@@ -248,7 +253,12 @@ fn record_response(span: &Span, kind: sealed::SpanKind, status: StatusCode, head
     span.record("http.response.status_code", status.as_u16() as i64);
 
     for (header_name, header_value) in headers.iter() {
-        if let Ok(attribute_value) = header_value.to_str() {
+        let attribute_value = if header_value.is_sensitive() {
+            Some("Sensitive")
+        } else {
+            header_value.to_str().ok()
+        };
+        if let Some(attribute_value) = attribute_value {
             let attribute_name = format!("http.response.header.{}", header_name);
             span.set_attribute(attribute_name, attribute_value.to_owned());
         }

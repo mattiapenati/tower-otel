@@ -1,3 +1,7 @@
+## Unreleased
+
+- Redact sensitive request and response headers.
+
 ## 0.10.0
 
 - Update [`opentelemetry`]` to v0.32.0

@@ -5,6 +5,7 @@ members = [".", "examples/http", "examples/grpc"]
 authors = [
   "Mattia Penati <mattia.penati@protonmail.com>",
   "Sylwester Rąpała <sylwesterrapala@outlook.com>",
+  "Stefan Kreutz <mail@skreutz.com>",
 ]
 edition = "2021"
 license = "Apache-2.0 OR MIT"
