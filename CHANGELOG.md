@@ -1,3 +1,8 @@
+## Unreleased
+
+- Fix HTTP span name
+- Fix HTTP span attribute `http.route`
+
 ## 0.10.0
 
 - Update [`opentelemetry`]` to v0.32.0

@@ -152,12 +152,14 @@ fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl Ht
                 "client.address" = Empty,
                 "client.port" = Empty,
                 "error.message" = Empty,
-                "http.request.method" = data.method,
+                "http.request.method" = data.method.unwrap_or("_OTHER"),
                 "http.response.status_code" = Empty,
+                "http.route" = Empty,
                 "network.protocol.name" = "http",
                 "network.protocol.version" = data.version,
                 "otel.kind" = kind.as_str(),
                 "otel.status_code" = Empty,
+                "otel.name" = Empty,
                 "server.address" = Empty,
                 "server.port" = Empty,
                 "url.full" = Empty,
@@ -175,6 +177,16 @@ fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl Ht
         Level::DEBUG => make_span!(Level::DEBUG),
         Level::TRACE => make_span!(Level::TRACE),
     };
+
+    let otel_name = {
+        let method = data.method.unwrap_or("HTTP");
+        if let Some(target) = data.http_route {
+            &format!("{method} {target}")
+        } else {
+            method
+        }
+    };
+    span.record("otel.name", otel_name);
 
     for (header_name, header_value) in data.headers.iter() {
         if let Ok(attribute_value) = header_value.to_str() {
@@ -295,7 +307,7 @@ pub(crate) mod sealed {
 
     /// Data extracted from an HTTP request used to build a tracing span.
     pub struct RequestSpanData<'r> {
-        pub(crate) method: &'static str,
+        pub(crate) method: Option<&'static str>,
         pub(crate) version: Option<&'static str>,
         pub(crate) url: util::Uri<'r>,
         pub(crate) headers: &'r HeaderMap,
