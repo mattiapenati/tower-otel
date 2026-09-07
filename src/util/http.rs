@@ -10,18 +10,18 @@ const X_FORWARDED_PROTO: http::HeaderName = http::HeaderName::from_static("x-for
 const X_FORWARDED_HOST: http::HeaderName = http::HeaderName::from_static("x-forwarded-host");
 
 /// String representation of HTTP method
-pub fn http_method(method: &Method) -> &'static str {
+pub fn http_method(method: &Method) -> Option<&'static str> {
     match *method {
-        Method::GET => "GET",
-        Method::POST => "POST",
-        Method::PUT => "PUT",
-        Method::DELETE => "DELETE",
-        Method::HEAD => "HEAD",
-        Method::OPTIONS => "OPTIONS",
-        Method::CONNECT => "CONNECT",
-        Method::PATCH => "PATCH",
-        Method::TRACE => "TRACE",
-        _ => "_OTHER",
+        Method::GET => Some("GET"),
+        Method::POST => Some("POST"),
+        Method::PUT => Some("PUT"),
+        Method::DELETE => Some("DELETE"),
+        Method::HEAD => Some("HEAD"),
+        Method::OPTIONS => Some("OPTIONS"),
+        Method::CONNECT => Some("CONNECT"),
+        Method::PATCH => Some("PATCH"),
+        Method::TRACE => Some("TRACE"),
+        _ => None,
     }
 }
 
