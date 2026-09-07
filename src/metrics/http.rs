@@ -102,7 +102,7 @@ impl MetricsRecord {
 
             attributes.push(KeyValue::new(
                 "http.request.method",
-                util::http_method(data.method),
+                util::http_method(data.method).unwrap_or("_OTHER"),
             ));
 
             if let Some(server_address) = data.server_address {
