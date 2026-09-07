@@ -171,7 +171,12 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
     };
 
     for (header_name, header_value) in request.headers().iter() {
-        if let Ok(attribute_value) = header_value.to_str() {
+        let attribute_value = if header_value.is_sensitive() {
+            Some("Sensitive")
+        } else {
+            header_value.to_str().ok()
+        };
+        if let Some(attribute_value) = attribute_value {
             let attribute_name = format!("rpc.grpc.request.metadata.{}", header_name);
             span.set_attribute(attribute_name, attribute_value.to_owned());
         }
@@ -240,7 +245,12 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
 /// Records fields associated to the response.
 fn record_response<B>(span: &Span, response: &Response<B>) {
     for (header_name, header_value) in response.headers().iter() {
-        if let Ok(attribute_value) = header_value.to_str() {
+        let attribute_value = if header_value.is_sensitive() {
+            Some("Sensitive")
+        } else {
+            header_value.to_str().ok()
+        };
+        if let Some(attribute_value) = attribute_value {
             let attribute_name = format!("rpc.grpc.response.metadata.{}", header_name);
             span.set_attribute(attribute_name, attribute_value.to_owned());
         }
