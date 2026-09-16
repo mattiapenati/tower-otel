@@ -3,6 +3,7 @@
 - Fix HTTP span name and attribute `http.route`.
 - Redact sensitive request and response headers.
 - Unregister active HTTP requests when response futures are dropped.
+- Record cancelled HTTP and gRPC spans when response futures are dropped.
 
 ## 0.10.0
 
