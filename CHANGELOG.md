@@ -1,8 +1,8 @@
 ## Unreleased
 
-- Fix HTTP span name
-- Fix HTTP span attribute `http.route`
+- Fix HTTP span name and attribute `http.route`.
 - Redact sensitive request and response headers.
+- Unregister active HTTP requests when response futures are dropped.
 
 ## 0.10.0
 
