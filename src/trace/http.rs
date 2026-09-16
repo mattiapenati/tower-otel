@@ -11,7 +11,7 @@ use std::{
 };
 
 use http::{HeaderMap, Response, StatusCode};
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
@@ -88,18 +88,18 @@ where
 
         ResponseFuture {
             inner,
-            span,
+            span: Some(span),
             kind: self.kind,
         }
     }
 }
 
 /// Response future for [`Http`].
-#[pin_project]
+#[pin_project(PinnedDrop)]
 pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
-    span: Span,
+    span: Option<Span>,
     kind: sealed::SpanKind,
 }
 
@@ -113,17 +113,35 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _enter = this.span.enter();
+        let span = this.span.as_ref().expect("future polled after completion");
 
-        match ready!(this.inner.poll(cx)) {
-            Ok(response) => {
-                record_response(this.span, *this.kind, response.status(), response.headers());
-                Poll::Ready(Ok(response))
+        let response = {
+            let _enter = span.enter();
+            match ready!(this.inner.poll(cx)) {
+                Ok(response) => {
+                    record_response(span, *this.kind, response.status(), response.headers());
+                    Ok(response)
+                }
+                Err(err) => {
+                    record_error(span, &err);
+                    Err(err)
+                }
             }
-            Err(err) => {
-                record_error(this.span, &err);
-                Poll::Ready(Err(err))
-            }
+        };
+
+        *this.span = None;
+
+        Poll::Ready(response)
+    }
+}
+
+#[pinned_drop]
+impl<F> PinnedDrop for ResponseFuture<F> {
+    fn drop(self: Pin<&mut Self>) {
+        let this = self.project();
+
+        if let Some(span) = this.span.as_ref() {
+            record_cancel(span, *this.kind);
         }
     }
 }
@@ -152,6 +170,7 @@ fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl Ht
                 "client.address" = Empty,
                 "client.port" = Empty,
                 "error.message" = Empty,
+                "error.type" = Empty,
                 "http.request.method" = data.method.unwrap_or("_OTHER"),
                 "http.response.status_code" = Empty,
                 "http.route" = Empty,
@@ -290,6 +309,18 @@ fn record_response(span: &Span, kind: sealed::SpanKind, status: StatusCode, head
 fn record_error<E: Display>(span: &Span, err: &E) {
     span.record("otel.status_code", "ERROR");
     span.record("error.message", err.to_string());
+}
+
+/// Records a cancelled server request.
+fn record_cancel(span: &Span, kind: sealed::SpanKind) {
+    const CANCELLED_ERROR_TYPE: &str = "cancelled";
+
+    if let sealed::SpanKind::Client = kind {
+        return;
+    }
+
+    span.record("otel.status_code", "ERROR");
+    span.record("error.type", CANCELLED_ERROR_TYPE);
 }
 
 pub(crate) mod sealed {
