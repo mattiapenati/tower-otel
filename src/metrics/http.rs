@@ -16,7 +16,7 @@ use opentelemetry::{
     metrics::{Histogram, Meter, UpDownCounter},
     KeyValue,
 };
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -142,6 +142,11 @@ impl MetricsRecord {
 
         state
     }
+
+    fn unregister_request(&self, state: &MetricState) {
+        self.active_requests
+            .add(-1, state.active_requests_attributes());
+    }
 }
 
 struct MetricState {
@@ -190,8 +195,7 @@ impl MetricsRecord {
 
         self.request_duration.record(duration, state.attributes());
 
-        self.active_requests
-            .add(-1, state.active_requests_attributes());
+        self.unregister_request(state);
 
         if let Some(request_body_size) = state.request_body_size {
             self.request_body_size
@@ -270,18 +274,18 @@ where
         ResponseFuture {
             inner,
             record,
-            state,
+            state: Some(state),
         }
     }
 }
 
 /// Response future for [`Http`].
-#[pin_project]
+#[pin_project(PinnedDrop)]
 pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
     record: Arc<MetricsRecord>,
-    state: MetricState,
+    state: Option<MetricState>,
 }
 
 impl<F, Res, E> Future for ResponseFuture<F>
@@ -296,9 +300,22 @@ where
         let this = self.project();
 
         let inner_response = ready!(this.inner.poll(cx));
-        this.record.record_response(this.state, &inner_response);
+        let state = this.state.as_mut().expect("future polled after completion");
+        this.record.record_response(state, &inner_response);
+        *this.state = None;
 
         Poll::Ready(inner_response)
+    }
+}
+
+#[pinned_drop]
+impl<F> PinnedDrop for ResponseFuture<F> {
+    fn drop(self: Pin<&mut Self>) {
+        let this = self.project();
+
+        if let Some(state) = this.state.as_ref() {
+            this.record.unregister_request(state);
+        };
     }
 }
 
