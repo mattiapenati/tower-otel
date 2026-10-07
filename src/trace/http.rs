@@ -1,23 +1,29 @@
 //! Middleware that adds tracing to a [`Service`] that handles HTTP requests.
 
+mod trace_body;
+
 #[cfg(feature = "reqwest_013")]
 mod reqwest;
 
 use std::{
     fmt::Display,
     future::Future,
+    marker::PhantomData,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
-use http::{HeaderMap, Response, StatusCode};
-use pin_project::pin_project;
+use http::{HeaderMap, StatusCode};
+use pin_project::{pin_project, pinned_drop};
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::trace::{extractor::HeaderExtractor, injector::HeaderInjector};
+
+#[doc(inline)]
+pub use self::trace_body::TraceBody;
 
 /// [`Layer`] that adds tracing to a [`Service`] that handles HTTP requests.
 #[derive(Clone, Debug)]
@@ -42,6 +48,11 @@ impl HttpLayer {
             kind: sealed::SpanKind::Client,
         }
     }
+
+    /// Records response body errors and early drops on the request span.
+    pub fn trace_body(self) -> TraceBodyLayer {
+        TraceBodyLayer { inner: self }
+    }
 }
 
 impl<S> Layer<S> for HttpLayer {
@@ -52,6 +63,22 @@ impl<S> Layer<S> for HttpLayer {
             inner,
             level: self.level,
             kind: self.kind,
+        }
+    }
+}
+
+/// HTTP tracing [`Layer`] that also records response body errors and early drops.
+#[derive(Clone, Debug)]
+pub struct TraceBodyLayer {
+    inner: HttpLayer,
+}
+
+impl<S> Layer<S> for TraceBodyLayer {
+    type Service = TraceBodyService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        TraceBodyService {
+            inner: self.inner.layer(inner),
         }
     }
 }
@@ -86,44 +113,105 @@ where
             self.inner.call(req)
         };
 
-        ResponseFuture {
+        ResponseFuture::new(inner, span, self.kind)
+    }
+}
+
+/// HTTP tracing middleware that also records response body errors and early drops.
+#[derive(Clone, Debug)]
+pub struct TraceBodyService<S> {
+    inner: Http<S>,
+}
+
+impl<S, Req, ResBody> Service<Req> for TraceBodyService<S>
+where
+    S: Service<Req, Response = http::Response<ResBody>>,
+    S::Error: Display,
+    Req: HttpRequest,
+    ResBody: http_body::Body,
+{
+    type Response = http::Response<TraceBody<ResBody>>;
+    type Error = S::Error;
+    type Future = ResponseFuture<S::Future, sealed::UseTraceBody>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Req) -> Self::Future {
+        let span = make_request_span(self.inner.level, self.inner.kind, &mut req);
+        let inner = {
+            let _enter = span.enter();
+            self.inner.inner.call(req)
+        };
+
+        ResponseFuture::new(inner, span, self.inner.kind)
+    }
+}
+
+/// Response future for [`Http`] and [`TraceBodyService`].
+#[pin_project(PinnedDrop)]
+pub struct ResponseFuture<F, M = sealed::Identity> {
+    #[pin]
+    inner: F,
+    span: Option<Span>,
+    kind: sealed::SpanKind,
+    map: PhantomData<fn() -> M>,
+}
+
+impl<F, M> ResponseFuture<F, M> {
+    /// Associates a response future with its request span.
+    fn new(inner: F, span: Span, kind: sealed::SpanKind) -> Self {
+        Self {
             inner,
-            span,
-            kind: self.kind,
+            span: Some(span),
+            kind,
+            map: PhantomData,
         }
     }
 }
 
-/// Response future for [`Http`].
-#[pin_project]
-pub struct ResponseFuture<F> {
-    #[pin]
-    inner: F,
-    span: Span,
-    kind: sealed::SpanKind,
-}
-
-impl<F, Res, E> Future for ResponseFuture<F>
+impl<F, Res, E, M> Future for ResponseFuture<F, M>
 where
     F: Future<Output = Result<Res, E>>,
+    M: sealed::ResponseMapper<Res>,
     Res: HttpResponse,
     E: Display,
 {
-    type Output = Result<Res, E>;
+    type Output = Result<M::Output, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _enter = this.span.enter();
+        let span = this.span.as_ref().expect("future polled after completion");
 
-        match ready!(this.inner.poll(cx)) {
-            Ok(response) => {
-                record_response(this.span, *this.kind, response.status(), response.headers());
-                Poll::Ready(Ok(response))
+        let response = {
+            let _enter = span.enter();
+            match ready!(this.inner.poll(cx)) {
+                Ok(response) => {
+                    record_response(span, *this.kind, response.status(), response.headers());
+                    Ok(response)
+                }
+                Err(err) => {
+                    record_error(span, &err);
+                    Err(err)
+                }
             }
-            Err(err) => {
-                record_error(this.span, &err);
-                Poll::Ready(Err(err))
-            }
+        };
+
+        let span = this.span.take().unwrap();
+        let response = response.map(|response| M::map_response(response, span));
+
+        Poll::Ready(response)
+    }
+}
+
+#[pinned_drop]
+impl<F, Map> PinnedDrop for ResponseFuture<F, Map> {
+    fn drop(self: Pin<&mut Self>) {
+        let this = self.project();
+
+        if let Some(span) = this.span.as_ref() {
+            record_cancel(span, *this.kind);
         }
     }
 }
@@ -136,7 +224,7 @@ impl<B> HttpRequest for http::Request<B> {}
 /// Abstraction over HTTP responses that can be used by the middleware.
 pub trait HttpResponse: sealed::HttpResponse {}
 
-impl<B> HttpResponse for Response<B> {}
+impl<B> HttpResponse for http::Response<B> {}
 
 /// Creates a new [`Span`] for the given request.
 fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl HttpRequest) -> Span {
@@ -152,6 +240,7 @@ fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl Ht
                 "client.address" = Empty,
                 "client.port" = Empty,
                 "error.message" = Empty,
+                "error.type" = Empty,
                 "http.request.method" = data.method.unwrap_or("_OTHER"),
                 "http.response.status_code" = Empty,
                 "http.route" = Empty,
@@ -159,6 +248,7 @@ fn make_request_span(level: Level, kind: sealed::SpanKind, request: &mut impl Ht
                 "network.protocol.version" = data.version,
                 "otel.kind" = kind.as_str(),
                 "otel.status_code" = Empty,
+                "otel.status_description" = Empty,
                 "otel.name" = Empty,
                 "server.address" = Empty,
                 "server.port" = Empty,
@@ -292,8 +382,21 @@ fn record_error<E: Display>(span: &Span, err: &E) {
     span.record("error.message", err.to_string());
 }
 
+/// Records a cancelled server request.
+fn record_cancel(span: &Span, kind: sealed::SpanKind) {
+    const CANCELLED_ERROR_TYPE: &str = "cancelled";
+
+    if let sealed::SpanKind::Client = kind {
+        return;
+    }
+
+    span.record("otel.status_code", "ERROR");
+    span.record("error.type", CANCELLED_ERROR_TYPE);
+}
+
 pub(crate) mod sealed {
     use http::{HeaderMap, Response, StatusCode};
+    use tracing::Span;
 
     use crate::util;
 
@@ -312,6 +415,44 @@ pub(crate) mod sealed {
                 SpanKind::Client => "client",
                 SpanKind::Server => "server",
             }
+        }
+    }
+
+    /// Transforms a response using its request span.
+    pub trait ResponseMapper<Res> {
+        /// Mapped response type.
+        type Output;
+
+        /// Maps the response, taking ownership of the request span.
+        fn map_response(response: Res, span: Span) -> Self::Output;
+    }
+
+    /// Returns the response unchanged.
+    #[non_exhaustive]
+    pub struct Identity;
+
+    impl<Res> ResponseMapper<Res> for Identity {
+        type Output = Res;
+
+        #[inline]
+        fn map_response(response: Res, _span: Span) -> Self::Output {
+            response
+        }
+    }
+
+    /// Wraps the response body to record errors and early drops.
+    #[non_exhaustive]
+    pub struct UseTraceBody;
+
+    impl<B> ResponseMapper<http::Response<B>> for UseTraceBody
+    where
+        B: http_body::Body,
+    {
+        type Output = http::Response<super::TraceBody<B>>;
+
+        #[inline]
+        fn map_response(response: http::Response<B>, span: Span) -> Self::Output {
+            response.map(|body| super::TraceBody::new(body, span))
         }
     }
 

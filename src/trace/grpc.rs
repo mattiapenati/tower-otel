@@ -8,7 +8,7 @@ use std::{
 };
 
 use http::{Request, Response};
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{Level, Span};
@@ -93,16 +93,21 @@ where
             self.inner.call(req)
         };
 
-        ResponseFuture { inner, span }
+        ResponseFuture {
+            inner,
+            span: Some(span),
+            kind: self.kind,
+        }
     }
 }
 
 /// Response future for [`Grpc`].
-#[pin_project]
+#[pin_project(PinnedDrop)]
 pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
-    span: Span,
+    span: Option<Span>,
+    kind: SpanKind,
 }
 
 impl<F, ResBody, E> Future for ResponseFuture<F>
@@ -114,17 +119,35 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let _enter = this.span.enter();
+        let span = this.span.as_ref().expect("future polled after completion");
 
-        match ready!(this.inner.poll(cx)) {
-            Ok(response) => {
-                record_response(this.span, &response);
-                Poll::Ready(Ok(response))
+        let response = {
+            let _enter = span.enter();
+            match ready!(this.inner.poll(cx)) {
+                Ok(response) => {
+                    record_response(span, &response);
+                    Ok(response)
+                }
+                Err(err) => {
+                    record_error(span, &err);
+                    Err(err)
+                }
             }
-            Err(err) => {
-                record_error(this.span, &err);
-                Poll::Ready(Err(err))
-            }
+        };
+
+        *this.span = None;
+
+        Poll::Ready(response)
+    }
+}
+
+#[pinned_drop]
+impl<F> PinnedDrop for ResponseFuture<F> {
+    fn drop(self: Pin<&mut Self>) {
+        let this = self.project();
+
+        if let Some(span) = this.span.as_ref() {
+            record_cancel(span, *this.kind);
         }
     }
 }
@@ -149,6 +172,7 @@ fn make_request_span<B>(level: Level, kind: SpanKind, request: &mut Request<B>) 
                 "client.address" = Empty,
                 "client.port" = Empty,
                 "error.message" = Empty,
+                "error.type" = Empty,
                 "otel.kind" = span_kind(kind),
                 "otel.name" = Empty,
                 "otel.status_code" = Empty,
@@ -271,4 +295,19 @@ fn record_response<B>(span: &Span, response: &Response<B>) {
 fn record_error<E: Display>(span: &Span, err: &E) {
     span.record("otel.status_code", "ERROR");
     span.record("error.message", err.to_string());
+}
+
+/// Records a cancelled RPC.
+fn record_cancel(span: &Span, kind: SpanKind) {
+    const CANCELLED_ERROR_TYPE: &str = "CANCELLED";
+    const CANCELLED_STATUS_CODE: i64 = 1;
+
+    span.record("rpc.grpc.status_code", CANCELLED_STATUS_CODE);
+
+    if let SpanKind::Server = kind {
+        return;
+    }
+
+    span.record("otel.status_code", "ERROR");
+    span.record("error.type", CANCELLED_ERROR_TYPE);
 }
