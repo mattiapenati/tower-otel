@@ -4,6 +4,8 @@
 - Redact sensitive request and response headers.
 - Unregister active HTTP requests when response futures are dropped.
 - Record cancelled HTTP and gRPC spans when response futures are dropped.
+- Add `HttpLayer::trace_body()` to record response body errors and early drops,
+  with `TraceBody::cancel()` for intentional cancellation.
 
 ## 0.10.0
 
