@@ -1,4 +1,4 @@
-## Unreleased
+## 0.11.0
 
 - Fix HTTP span name and attribute `http.route`.
 - Redact sensitive request and response headers.
