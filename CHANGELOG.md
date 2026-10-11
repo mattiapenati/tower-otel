@@ -1,3 +1,8 @@
+## Unreleased
+
+- Update [`opentelemetry`]` to v0.33.0
+- Update [`tracing-opentelemetry`]` to v0.34.0
+
 ## 0.11.0
 
 - Fix HTTP span name and attribute `http.route`.
