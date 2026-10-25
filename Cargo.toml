@@ -7,7 +7,7 @@ authors = [
   "Sylwester Rąpała <sylwesterrapala@outlook.com>",
   "Stefan Kreutz <mail@skreutz.com>",
 ]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0 OR MIT"
 
 [workspace.dependencies]
@@ -27,7 +27,7 @@ tracing-subscriber = "0.3"
 
 [package]
 name = "tower-otel"
-version = "0.11.0"
+version = "0.12.0"
 description = "OpenTelemetry layer for HTTP/gRPC services"
 keywords = ["opentelemetry", "tracing", "tower", "http", "grpc"]
 homepage = "https://github.com/mattiapenati/tower-otel"
