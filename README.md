@@ -8,6 +8,19 @@ This crate provides an OpenTelemetry layer for HTTP and gRPC services built on
 top of [`tower`]. The implementation is compliant to the semantic conventions
 defined for [HTTP spans] and [RPC].
 
+## Compatibility
+
+Versions below identify compatible minor release series.
+
+| `tower-otel` | `opentelemetry` |
+| --- | --- |
+| 0.12 | 0.33 |
+| 0.10 - 0.11 | 0.32 |
+| 0.8 - 0.9 | 0.31 |
+| 0.6 - 0.7 | 0.30 |
+| 0.3 - 0.5 | 0.29 |
+| 0.1 - 0.2 | 0.21 |
+
 ## License
 
 Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
